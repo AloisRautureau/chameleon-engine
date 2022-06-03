@@ -1,0 +1,30 @@
+[package]
+name = "chameleon"
+version = "0.1.0"
+authors = ["Aloïs 'baub' RAUTUREAU"]
+edition = "2021"
+description = "A toy-project chess engine"
+license = "MIT"
+build = "build.rs"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+rustyline = "9.1.0"
+regex = "1"
+
+[build-dependencies]
+rand_mt = "4.1"
+
+[profile.release]
+lto = true
+panic = "abort"
+opt-level = 3
+codegen-units = 1
+
+[profile.dev]
+lto = true
+opt-level = 3
+debug = 1
+incremental = true
+overflow-checks = false

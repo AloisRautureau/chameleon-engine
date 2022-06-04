@@ -20,7 +20,7 @@ pub struct SearchOptions {
     pub infinite: bool,
     pub moves_to_search: Option<MoveList>,
     pub moves_until_time_control: Option<u32>,
-    pub max_depth: Option<u32>,
+    pub max_depth: Option<i32>,
     pub max_nodes: Option<u128>,
     pub max_time: Option<Duration>,
 }
@@ -31,7 +31,7 @@ impl SearchOptions {
         clock: Option<Duration>,
         increment: Option<Duration>,
         moves_until_time_control: Option<u32>,
-        max_depth: Option<u32>,
+        max_depth: Option<i32>,
         max_nodes: Option<u128>,
         max_time: Option<Duration>,
     ) -> SearchOptions {
@@ -113,22 +113,22 @@ pub struct Search {
     pub score: Score,
     pub principal_variation: MoveList,
     pub time: Duration,
-    pub depth_reached: u32,
+    pub depth_reached: i32,
     pub nodes_searched: u128,
 }
 struct SearchContext<'a> {
     pub tt_handle: Arc<Mutex<TranspositionTable>>,
     pub killers: [Option<Move>; 32],
     pub pv: MoveList,
-    pub total_depth: u32,
+    pub total_depth: i32,
     pub null_allowed: bool,
     pub nodes_searched: &'a mut u128,
     pub should_stop: &'a (dyn Fn() -> bool)
 }
 impl Search {
     const INFINITY: i32 = i32::MAX;
-    const MAX_DEPTH: u32 = 32;
-    const R: u32 = 2;
+    const MAX_DEPTH: i32 = 32;
+    const R: i32 = 2;
 
     /// Runs a new search with the given options, returning a handle to the thread running said
     /// search, as well as a mutex holding the result
@@ -247,10 +247,10 @@ impl Search {
     }
 
     /// The core alpha beta function
-    fn alpha_beta(position: &mut Board, mut alpha: Score, beta: Score, mut depth: u32, local_pv: &mut VecDeque<Move>, context: &mut SearchContext) -> Score {
+    fn alpha_beta(position: &mut Board, mut alpha: Score, beta: Score, mut depth: i32, local_pv: &mut VecDeque<Move>, context: &mut SearchContext) -> Score {
         *context.nodes_searched += 1;
 
-        if depth == 0 || (context.should_stop)() {
+        if depth <= 0 || (context.should_stop)() {
             return Self::quiescence(position, alpha, beta, context)
         }
 
@@ -276,7 +276,7 @@ impl Search {
 
         // Null move reduction
         if context.null_allowed && !in_check {
-            let reduced_depth = if depth > Self::R { depth - Self::R - 1 } else { 0 };
+            let reduced_depth = depth - Self::R - 1;
             context.null_allowed = false;
             position.make(Move::NULL_MOVE);
             let score = -Self::alpha_beta(position, -beta, -beta+1, reduced_depth, local_pv, context);
@@ -295,14 +295,19 @@ impl Search {
         // PV search
         let mut search_pv = true;
 
-        for mv in moves_iter {
+        for (mv_index, mv) in moves_iter.enumerate() {
             let mut move_pv = VecDeque::with_capacity(depth as usize);
             position.make(mv);
             let mut score;
             if search_pv {
                 score = -Self::alpha_beta(position, -beta, -alpha, depth - 1, &mut move_pv, context);
             } else {
-                score = -Self::alpha_beta(position, -alpha-1, -alpha, depth - 1, &mut move_pv, context);
+                // Late Move Reduction scheme
+                let allow_reduction = mv_index > 4 && !in_check && depth <= 3 && !mv.is_capture();
+                let depth_to_search = if allow_reduction { depth - 2 } else { depth - 1 };
+                score = -Self::alpha_beta(position, -alpha-1, -alpha, depth_to_search, &mut move_pv, context);
+                // If score is better than alpha, re-search at full depth in case
+                // we missed something
                 if score > alpha {
                     score = -Self::alpha_beta(position, -beta, -alpha, depth - 1, &mut move_pv, context);
                 }
@@ -378,7 +383,7 @@ impl Search {
         alpha
     }
 
-    fn score_moves<'a>(board: &'a Board, depth: u32, context: &SearchContext) -> impl Fn(Move) -> Score + 'a {
+    fn score_moves<'a>(board: &'a Board, depth: i32, context: &SearchContext) -> impl Fn(Move) -> Score + 'a {
         let pv_move = context.pv.get((context.total_depth - depth) as usize);
         let killer = context.killers[(context.total_depth - depth) as usize];
         let hash_move = (context.tt_handle.lock().unwrap())

@@ -9,7 +9,7 @@ pub enum NodeType {
 pub struct SearchInfo {
     pub position_hash: Hash,
     pub best_move: Option<Move>,
-    pub depth_searched: u32,
+    pub depth_searched: i32,
     pub score: Score,
     pub node_type: NodeType,
     pub age: bool,

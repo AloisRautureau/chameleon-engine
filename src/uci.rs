@@ -124,7 +124,7 @@ impl UCI {
             clock,
             increment,
             arg_value_map.get("movestogo").map(|d| d.parse::<u32>().unwrap()),
-            arg_value_map.get("depth").map(|d| d.parse::<u32>().unwrap()),
+            arg_value_map.get("depth").map(|d| d.parse::<i32>().unwrap()),
             arg_value_map.get("nodes").map(|d| d.parse::<u128>().unwrap()),
             arg_value_map.get("movetime").map(|d| Duration::from_millis(d.parse::<u64>().unwrap()))
         )

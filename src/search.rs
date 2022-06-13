@@ -367,7 +367,7 @@ impl Search {
         if (context.should_stop)() { return alpha }
 
         let captures = generate(position, GenType::Captures);
-        let moves_iter = captures.best_first_iter(&Self::score_moves(&position, 0, &context));
+        let moves_iter = captures.best_first_iter(&Self::score_quiescence(&position));
 
         for mv in moves_iter {
             if see(position, mv.origin(), mv.target()) < 0 { continue } 
@@ -393,7 +393,14 @@ impl Search {
             if Some(m) == pv_move { 1000000 }
             else if Some(m) == hash_move { 100000 }
             else if Some(m) == killer { 10000 }
-            else if m.is_capture() { evaluation::see(&board, m.origin(), m.target()) }
+            else if m.is_capture() { see(&board, m.origin(), m.target()) }
+            else { 0 }
+        }
+    }
+
+    fn score_quiescence<'a>(board: &'a Board) -> impl Fn(Move) -> Score + 'a {
+        move |m| {
+            if m.is_capture() { see(&board, m.origin(), m.target()) }
             else { 0 }
         }
     }

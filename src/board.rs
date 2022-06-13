@@ -72,13 +72,13 @@ impl Board {
             self.castling_rights.uncastle(self.side_to_move);
         }
         if origin == 7 || target == 7 {
-            self.castling_rights.uncastle_kingside(Color::White);
+            self.castling_rights.uncastle_kingside(White);
         } else if origin == 0 || target == 0 {
-            self.castling_rights.uncastle_queenside(Color::White);
+            self.castling_rights.uncastle_queenside(White);
         } else if origin == 63 || target == 63 {
-            self.castling_rights.uncastle_kingside(Color::Black);
+            self.castling_rights.uncastle_kingside(Black);
         } else if origin == 56 || target == 56 {
-            self.castling_rights.uncastle_queenside(Color::Black);
+            self.castling_rights.uncastle_queenside(Black);
         }
         self.hash ^= ZobristHasher::castling_rights_hash(self.castling_rights);
 
@@ -89,7 +89,7 @@ impl Board {
         self.add_piece(moved_piece, target);
 
         match mv.flags() {
-            MoveFlags::Quiet if moved_piece.piece_type != PieceType::Pawn => {
+            MoveFlags::Quiet if moved_piece.piece_type != Pawn => {
                 self.reversible_moves += 1;
                 self.repeatable.push(before_move_hash);
             },
@@ -191,7 +191,7 @@ impl Board {
         match move_played.flags() {
             MoveFlags::EnPassant => {
                 self.add_piece(
-                    Piece { piece_type: PieceType::Pawn, color: self.side_to_move.opposite() },
+                    Piece { piece_type: Pawn, color: self.side_to_move.opposite() },
                     if self.side_to_move == White { move_played.target()-8 } else { move_played.target()+8 }
                 )
             },
@@ -438,7 +438,7 @@ impl Board {
             }
         }
 
-        fen.push_str(if self.side_to_move == Color::White { " w " } else { " b " });
+        fen.push_str(&self.side_to_move.to_string());
         fen.push_str(&self.castling_rights.to_string());
         match self.ep_target {
             Some(sq) => fen.push_str(&(" ".to_owned() + &square_representation(sq).unwrap() + " ")),

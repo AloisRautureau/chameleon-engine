@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use crate::{zob_hash::Hash, evaluation::Score, r#move::Move};
 
 #[derive(PartialEq, Debug, Clone, Copy)]
@@ -25,12 +25,11 @@ impl std::fmt::Display for SearchInfo {
     }
 }
 
-pub struct TranspositionTable (HashMap<Hash, (SearchInfo, Option<SearchInfo>)>);
+pub struct TranspositionTable (FxHashMap<Hash, (SearchInfo, Option<SearchInfo>)>);
 
-//TODO: Maybe use rustc-hash crate if hashing ever becomes hot
 impl TranspositionTable {
     pub fn new(entries: usize) -> TranspositionTable {
-        TranspositionTable (HashMap::with_capacity(entries))
+        TranspositionTable (FxHashMap::with_capacity_and_hasher(entries, Default::default()))
     }
 
     pub fn get(&self, hash: Hash) -> Option<SearchInfo> {

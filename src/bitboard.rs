@@ -81,6 +81,8 @@ impl Bitboard {
     pub const CASTLING_ATTACKED_MASKS: [[Bitboard; 2]; 2] = [
         [Bitboard(0x6000000000000000), Bitboard(0xc00000000000000)], [Bitboard(0x60), Bitboard(0xc)]
     ];
+    pub const CENTER: Bitboard = Bitboard(0x1818000000);
+    pub const LARGE_CENTER: Bitboard = Bitboard(0x3c24243c0000);
 
     pub fn get_ray(origin: Square, target: Square) -> Bitboard {
         Self::ORIGIN_TARGET_RAYS[origin][target]

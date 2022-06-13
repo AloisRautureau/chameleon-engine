@@ -175,7 +175,7 @@ impl Search {
             should_stop: &stop_func
         };
 
-        let root_moves = if let Some(moves) = options.moves_to_search { 
+        let mut root_moves = if let Some(moves) = options.moves_to_search {
             moves
         } else {
             generate(&position, GenType::Legal)
@@ -186,47 +186,53 @@ impl Search {
         let mut previous_iteration_score = -Evaluation::MATE_SCORE-1;
         while !(context.should_stop)() && context.total_depth <= options.max_depth.unwrap_or(Self::MAX_DEPTH) {
             let mut aspiration_window = (previous_iteration_score - Self::BASE_WINDOW, previous_iteration_score + Self::BASE_WINDOW);
-            let mut iteration_best_move = None;
-            let mut iteration_score = -Evaluation::MATE_SCORE-1;
             let mut iteration_pv = VecDeque::with_capacity(context.total_depth as usize);
-            let moves_iter = root_moves.best_first_iter(&Self::score_moves(&position, context.total_depth, &context));
+            let mut iteration_mv_scores: Vec<(Move, Score)> = Vec::with_capacity(root_moves.len());
+            let moves_iter = root_moves.into_iter();
 
             for mv in moves_iter {
                 if (context.should_stop)() { break }
                 let mut move_pv = VecDeque::with_capacity(context.total_depth as usize);
                 position.make(mv);
-                let mut score = -Search::alpha_beta(&mut position, -beta, -alpha, context.total_depth-1,&mut move_pv, &mut context);
+                let mut score = -Search::alpha_beta(&mut position, -beta, -alpha, context.total_depth - 1, &mut move_pv, &mut context);
                 // The score falls out of our aspiration window, therefore we widen it
                 if score <= alpha || score >= beta {
                     if score <= alpha { aspiration_window.0 *= 2 } else { aspiration_window.1 *= 2 };
-                    alpha = previous_iteration_score - aspiration_window.0; beta = previous_iteration_score + aspiration_window.1;
-                    score = -Search::alpha_beta(&mut position, -beta, -alpha, context.total_depth-1, &mut move_pv, &mut context);
+                    alpha = previous_iteration_score - aspiration_window.0;
+                    beta = previous_iteration_score + aspiration_window.1;
+                    score = -Search::alpha_beta(&mut position, -beta, -alpha, context.total_depth - 1, &mut move_pv, &mut context);
                 }
                 position.unmake();
-                if iteration_best_move.is_none() || score > iteration_score {
-                    iteration_best_move = Some(mv);
-                    iteration_score = score;
+
+                // Insertion  of the move while keeping everything sorted
+                // to reuse the ordering in the next iteration
+                let insertion_pos = match iteration_mv_scores.binary_search_by(|(_, s)| score.cmp(s)) {
+                    Ok(i) => i,
+                    Err(i) => i
+                };
+                iteration_mv_scores.insert(insertion_pos, (mv, score));
+                if insertion_pos == 0 {
                     iteration_pv = move_pv;
                     iteration_pv.push_front(mv);
                 }
             }
-            if (context.should_stop)() { break }
-
             context.pv = MoveList::from(iteration_pv);
+
+            let (mv, score) = *iteration_mv_scores.first().expect("Tried searching a mated position");
 
             let mut tt = context.tt_handle.lock().unwrap();
             (*tt).set(position.get_hash(), SearchInfo {
                 position_hash: position.get_hash(),
-                best_move: iteration_best_move,
+                best_move: Some(mv),
                 depth_searched: context.total_depth,
-                score: iteration_score,
+                score,
                 node_type: NodeType::Exact,
                 age: position.halfmove_clock() % 2 == 0
             });
 
             let mut res = result.lock().unwrap();
-            (*res).best_move = iteration_best_move;
-            (*res).score = iteration_score;
+            (*res).best_move = Some(mv);
+            (*res).score = score;
             (*res).depth_reached = context.total_depth;
             (*res).time = start.elapsed();
             (*res).principal_variation = context.pv;
@@ -238,8 +244,15 @@ impl Search {
             }
             drop(res);
 
-            previous_iteration_score = iteration_score;
+            previous_iteration_score = score;
+            // Sort the moves depending on their current score
+            root_moves = MoveList::default();
+            for (mv, _) in iteration_mv_scores {
+                root_moves.push(mv);
+            }
             context.total_depth += 1;
+
+            if (context.should_stop)() { break }
         }
 
         let res = result.lock().unwrap();
@@ -310,7 +323,13 @@ impl Search {
             } else {
                 // Late Move Reduction scheme
                 let allow_reduction = mv_index > 4 && !in_check && depth <= 3 && !mv.is_capture();
-                let depth_to_search = if allow_reduction { depth - (mv_index / 2) as i32 } else { depth - 1 };
+                let depth_to_search = if allow_reduction && mv_index < 6 {
+                    depth - 2
+                } else if allow_reduction {
+                    depth >> 2
+                } else {
+                    depth - 1
+                };
                 score = -Self::alpha_beta(position, -alpha-1, -alpha, depth_to_search, &mut move_pv, context);
                 // If score is better than alpha, re-search at full depth in case
                 // we missed something
@@ -359,8 +378,6 @@ impl Search {
     /// A special search that tries to find a quiet position in order to reduce the
     /// horizon effect
     fn quiescence(position: &mut Board, mut alpha: Score, beta: Score, context: &mut SearchContext) -> Score {
-        *context.nodes_searched += 1;
-
         if generate(position, GenType::Legal).is_empty() {
             return if position.in_check(position.side_to_move()) { -Evaluation::MATE_SCORE } else { Evaluation::DRAW_SCORE }
         }
@@ -368,11 +385,11 @@ impl Search {
         let mut evaluation = Evaluation::shallow_eval(position);
         if evaluation.is_drawn { return evaluation.score; }
 
+        if evaluation.score >= beta { return beta }
+        if evaluation.score < alpha - Evaluation::MIDGAME_PIECE_TYPE_VALUE[4] { return alpha }
+
         evaluation.deep_eval(position);
-        let stand_pat = evaluation.score;
-        if stand_pat >= beta { return beta }
-        if stand_pat < alpha - Evaluation::MIDGAME_PIECE_TYPE_VALUE[4] { return alpha }
-        if alpha < stand_pat { alpha = stand_pat }
+        if alpha < evaluation.score { alpha = evaluation.score }
         if (context.should_stop)() { return alpha }
 
         let captures = generate(position, GenType::Captures);

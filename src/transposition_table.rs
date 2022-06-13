@@ -1,4 +1,4 @@
-use rustc_hash::FxHashMap;
+use std::sync::Mutex;
 use crate::{zob_hash::Hash, evaluation::Score, r#move::Move};
 
 #[derive(PartialEq, Debug, Clone, Copy)]
@@ -25,31 +25,52 @@ impl std::fmt::Display for SearchInfo {
     }
 }
 
-pub struct TranspositionTable (FxHashMap<Hash, (SearchInfo, Option<SearchInfo>)>);
+pub struct TranspositionTable (Vec<Mutex<(Option<SearchInfo>, Option<SearchInfo>)>>);
 
 impl TranspositionTable {
     pub fn new(entries: usize) -> TranspositionTable {
-        TranspositionTable (FxHashMap::with_capacity_and_hasher(entries, Default::default()))
+        let mut table = Vec::with_capacity(entries);
+        for _ in 0..entries {
+            table.push(Mutex::new((None, None)))
+        }
+        TranspositionTable (table)
     }
 
     pub fn get(&self, hash: Hash) -> Option<SearchInfo> {
-        if let Some((d,oa)) = self.0.get(&self.key_from_hash(hash)) {
-            if d.position_hash == hash { return Some(*d) } 
-            else if let Some(a) = oa { if a.position_hash == hash { return Some(*a) }}
+        let (depth_entry, young_entry) = if let Some(e) = self.0.get(self.key_from_hash(hash)) {
+            *e.lock().unwrap()
+        } else {
+            return None
+        };
+        if let Some(e) = depth_entry {
+            if e.position_hash == hash { return depth_entry }
+        } else if let Some(e) = young_entry {
+            if e.position_hash == hash { return young_entry }
         }
         None
     }
 
-    pub fn set(&mut self, hash: Hash, entry: SearchInfo) {
-        match self.0.get_mut(&self.key_from_hash(hash)) {
-            Some((d, oa)) => {
-                if Self::should_replace(&d, &entry) {
-                    *d = entry;
-                } else {
-                    *oa = Some(entry)
-                }
-            },
-            None => { self.0.insert(self.key_from_hash(hash), (entry, None)); }
+    pub fn set(&self, hash: Hash, entry: SearchInfo) {
+        let mut entries = if let Some(e) = self.0.get(self.key_from_hash(hash)) {
+            e.lock().unwrap()
+        } else {
+            return;
+        };
+
+        let depth_entry = &mut (*entries).0;
+
+        let place_in_depth = if let Some(e) = depth_entry {
+            Self::should_replace(&e, &entry)
+        } else {
+            true
+        };
+
+        if place_in_depth {
+            *depth_entry = Some(entry);
+        } else {
+            //drop(depth_entry);
+            let young_entry = &mut (*entries).1;
+            *young_entry = Some(entry);
         }
     }
 
@@ -57,7 +78,7 @@ impl TranspositionTable {
         old_info.age != new_info.age || old_info.depth_searched <= new_info.depth_searched
     }
 
-    fn key_from_hash(&self, hash: Hash) -> Hash {
-        hash % (self.0.capacity() as u64)
+    fn key_from_hash(&self, hash: Hash) -> usize {
+        (hash % (self.0.capacity() as u64)) as usize
     }
 }

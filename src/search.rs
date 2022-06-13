@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 use std::sync::{Mutex, Arc};
 use std::thread::{self, JoinHandle};
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::board::Board;
 use crate::r#move::Move;
@@ -64,30 +65,46 @@ impl SearchOptions {
         movetime
     }
 }
+impl Default for SearchOptions {
+    fn default() -> Self {
+        SearchOptions {
+            infinite: true,
+            moves_to_search: None,
+            moves_until_time_control: None,
+            max_depth: None,
+            max_nodes: None,
+            max_time: None
+        }
+    }
+}
 
 /// Lets us run the search in a separate thread, so that the UCI implementation
 /// stays responsive even during search
 pub struct SearchFramework {
-    transposition_table: Arc<Mutex<TranspositionTable>>,
+    transposition_table: Arc<TranspositionTable>,
     search_handle: Option<JoinHandle<()>>,
-    search_result: Option<Arc<Mutex<Search>>>
+    search_result: Option<Arc<Mutex<Search>>>,
+    stop_handle: Option<Arc<AtomicBool>>
 }
 impl SearchFramework {
     pub fn new() -> SearchFramework {
         SearchFramework {
-            transposition_table: Arc::new(Mutex::new(TranspositionTable::new(16384 * 2))),
+            transposition_table: Arc::new(TranspositionTable::new(16384 * 2)),
             search_handle: None,
-            search_result: None
+            search_result: None,
+            stop_handle: None,
         }
     }
 
     pub fn run_search(&mut self, position: &Board, options: SearchOptions) {
-        let (search_handle, search_result) = Search::new(position, options, &self.transposition_table);
+        let (search_handle, stop_handle, search_result) = Search::new(position, options, &self.transposition_table);
         self.search_handle = Some(search_handle);
         self.search_result = Some(search_result);
+        self.stop_handle = Some(stop_handle);
     }
 
     pub fn stop_search(&mut self) -> Option<Search> {
+        self.stop_handle.as_ref().unwrap().store(true, Ordering::SeqCst);
         self.search_handle = None;
         match &self.search_result {
             Some(arc_mutex) => {
@@ -101,8 +118,7 @@ impl SearchFramework {
 
     pub fn probe_table(&self, board: &Board) -> Option<SearchInfo> {
         let hash = board.get_hash();
-        let tt = self.transposition_table.lock().unwrap();
-        (*tt).get(hash)
+        self.transposition_table.get(hash)
     }
 }
 
@@ -117,7 +133,7 @@ pub struct Search {
     pub nodes_searched: u128,
 }
 struct SearchContext<'a> {
-    pub tt_handle: Arc<Mutex<TranspositionTable>>,
+    pub transposition_table: Arc<TranspositionTable>,
     pub killers: [Option<Move>; 32],
     pub pv: MoveList,
     pub total_depth: i32,
@@ -133,40 +149,45 @@ impl Search {
     /// Runs a new search with the given options, returning a handle to the thread running said
     /// search, as well as a mutex holding the result
     /// TODO: This might be more properly done by using async programming patterns
-    pub fn new(position: &Board, options: SearchOptions, tt: &Arc<Mutex<TranspositionTable>>) -> (JoinHandle<()>, Arc<Mutex<Search>>) {
+    pub fn new(position: &Board, options: SearchOptions, transposition_table: &Arc<TranspositionTable>) -> (JoinHandle<()>, Arc<AtomicBool>, Arc<Mutex<Search>>) {
         let result = Arc::new(Mutex::new(Search::default()));
+        let stop_handle = Arc::new(AtomicBool::new(false));
 
         // Main search worker
         let internal_position = position.clone();
         let internal_options = options.clone();
         let thread_result = Arc::clone(&result);
-        let tt_handle = Arc::clone(tt);
+        let stop_signal = Arc::clone(&stop_handle);
+        let tt_handle = Arc::clone(&transposition_table);
         let handle = thread::spawn(move || {
-            Search::search_root(internal_position, internal_options, thread_result, tt_handle, true);
+            Search::search_root(internal_position, internal_options, thread_result, tt_handle, true, stop_signal);
         });
 
-        (handle, result)
+        (handle, stop_handle, result)
     }
 
     /// Searches a given position, writing the results as it goes in a mutex
     /// It also sends information in the form of UCI commands during the search
-    fn search_root(mut position: Board, options: SearchOptions, result: Arc<Mutex<Search>>, tt_handle: Arc<Mutex<TranspositionTable>>, print_uci: bool) {
+    fn search_root(mut position: Board, options: SearchOptions, result: Arc<Mutex<Search>>, transposition_table: Arc<TranspositionTable>, print_uci: bool, stop_signal: Arc<AtomicBool>) {
         let mut nodes = 0u128;
 
         let start = Instant::now();
         let stop_func = move || {
-            if !options.infinite {
+            if stop_signal.load(Ordering::SeqCst) { true }
+            else if !options.infinite {
                 if let Some(duration) = options.max_time {
                     if start.elapsed() > duration { return true }
                 }
                 if let Some(mn) = options.max_nodes {
                     if nodes > mn { return true }
                 }
+                false
+            } else {
+                false
             }
-            false
         };
         let mut context = SearchContext {
-            tt_handle,
+            transposition_table,
             killers: Default::default(),
             pv: Default::default(),
             total_depth: 1,
@@ -220,8 +241,7 @@ impl Search {
 
             let (mv, score) = *iteration_mv_scores.first().expect("Tried searching a mated position");
 
-            let mut tt = context.tt_handle.lock().unwrap();
-            (*tt).set(position.get_hash(), SearchInfo {
+            context.transposition_table.set(position.get_hash(), SearchInfo {
                 position_hash: position.get_hash(),
                 best_move: Some(mv),
                 depth_searched: context.total_depth,
@@ -237,7 +257,6 @@ impl Search {
             (*res).time = start.elapsed();
             (*res).principal_variation = context.pv;
             (*res).nodes_searched = *context.nodes_searched;
-            drop(tt);
 
             if print_uci {
                 UCI::send(UCICommand::Info(&*res));
@@ -265,12 +284,13 @@ impl Search {
     fn alpha_beta(position: &mut Board, mut alpha: Score, beta: Score, mut depth: i32, local_pv: &mut VecDeque<Move>, context: &mut SearchContext) -> Score {
         *context.nodes_searched += 1;
 
+        if Evaluation::is_drawn(position) { return Evaluation::DRAW_SCORE }
+        let in_check = position.in_check(position.side_to_move());
+        if in_check { depth += 1 } // Check extension to avoid horizon effect
+
         if depth <= 0 || (context.should_stop)() {
             return Self::quiescence(position, alpha, beta, context)
         }
-
-        if Evaluation::is_drawn(position) { return Evaluation::DRAW_SCORE }
-        let in_check = position.in_check(position.side_to_move());
         // Futility pruning
         let enable_futility_pruning = !in_check && !position.last_was_capture();
         if depth == 1 && enable_futility_pruning {
@@ -339,8 +359,7 @@ impl Search {
             }
             position.unmake();
             if score >= beta {
-                let mut tt = context.tt_handle.lock().unwrap();
-                (*tt).set(position.get_hash(), SearchInfo {
+                context.transposition_table.set(position.get_hash(), SearchInfo {
                     position_hash: position.get_hash(),
                     best_move: Some(mv),
                     depth_searched: depth,
@@ -348,15 +367,13 @@ impl Search {
                     node_type: NodeType::Beta,
                     age: position.halfmove_clock() % 2 == 0
                 });
-                drop(tt);
-                if context.killers[depth as usize].is_none() { 
+                if context.killers[depth as usize].is_none() {
                     context.killers[depth as usize] = Some(mv) 
                 }
                 return beta;
             } 
             if score > alpha {
-                let mut tt = context.tt_handle.lock().unwrap();
-                (*tt).set(position.get_hash(), SearchInfo {
+                context.transposition_table.set(position.get_hash(), SearchInfo {
                     position_hash: position.get_hash(),
                     best_move: Some(mv),
                     depth_searched: depth,
@@ -364,7 +381,6 @@ impl Search {
                     node_type: NodeType::Exact,
                     age: position.halfmove_clock() % 2 == 0
                 });
-                drop(tt);
                 *local_pv = move_pv;
                 local_pv.push_front(mv);
                 search_pv = false;
@@ -412,7 +428,7 @@ impl Search {
     fn score_moves<'a>(board: &'a Board, depth: i32, context: &SearchContext) -> impl Fn(Move) -> Score + 'a {
         let pv_move = context.pv.get((context.total_depth - depth) as usize);
         let killer = context.killers[(context.total_depth - depth) as usize];
-        let hash_move = (context.tt_handle.lock().unwrap())
+        let hash_move = context.transposition_table
             .get(board.get_hash())
             .map(|i| i.best_move.unwrap());
         move |m| {

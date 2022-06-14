@@ -47,11 +47,11 @@ impl Evaluation {
         let mut eg_scores = [0, 0];
 
         for color in [Color::Black, Color::White] {
-            for (piece, bb) in board.material_iter(color) {
+            for (piece, bb) in board.material_iter(color).enumerate() {
                 for sq in if color == Color::White { *bb } else { bb.vertical_flip() } {
-                    phase -= Self::PHASE_VALUE[piece as usize];
-                    mg_scores[color as usize] += Self::MIDGAME_PIECE_TYPE_VALUE[piece as usize] + MIDGAME_PIECE_SQUARE_TABLE[piece as usize][sq];
-                    eg_scores[color as usize] += Self::ENDGAME_PIECE_TYPE_VALUE[piece as usize] + ENDGAME_PIECE_SQUARE_TABLE[piece as usize][sq];
+                    phase -= Self::PHASE_VALUE[piece];
+                    mg_scores[color as usize] += Self::MIDGAME_PIECE_TYPE_VALUE[piece] + MIDGAME_PIECE_SQUARE_TABLE[piece][sq];
+                    eg_scores[color as usize] += Self::ENDGAME_PIECE_TYPE_VALUE[piece] + ENDGAME_PIECE_SQUARE_TABLE[piece][sq];
                 }
             }
         }
@@ -169,7 +169,7 @@ impl Evaluation {
     /// Given a bitboard of attackers, returns the least valuable attacker from that bitboard
     fn least_valuable_attacker_square(board: &Board, attackers_bb: Bitboard, attacking_side: Color) -> Option<Square> {
         if attackers_bb != Bitboard::EMPTY {
-            for (_, bb) in board.material_iter(attacking_side) {
+            for bb in board.material_iter(attacking_side) {
                 let intersection = *bb & attackers_bb;
                 if intersection != Bitboard::EMPTY { return Some(intersection.ls1b()) }
             }

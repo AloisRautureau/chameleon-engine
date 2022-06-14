@@ -52,7 +52,7 @@ impl UCI {
                 }
                 if args.next().is_none() { return Ok(UCIOkCode::OkCommand) }
                 for mv in args {
-                    if let Err(_) = self.board.make_from_str(mv) { return Err(UCIErrCode::BadMove(String::from(mv))) }
+                    if self.board.make_from_str(mv).is_err() { return Err(UCIErrCode::BadMove(String::from(mv))) }
                 }
             }
             "go" => self.search_framework.run_search(

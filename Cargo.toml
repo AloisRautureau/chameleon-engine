@@ -12,6 +12,9 @@ build = "build.rs"
 [dependencies]
 rustyline = "9.1.0"
 regex = "1"
+spin = "0.9.3"
+mimalloc = { version = "*", default-features = false }
+arrayvec = "0.7.2"
 
 [build-dependencies]
 rand_mt = "4.1"

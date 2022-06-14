@@ -1,4 +1,8 @@
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
+
 use std::time::Instant;
+use mimalloc::MiMalloc;
 
 use crate::board::Board;
 use crate::move_generator::{GenType, generate};
@@ -39,8 +43,8 @@ fn _perft(board: &mut Board, depth: u32) -> u128 {
     let moves = generate(board, GenType::Legal);
     if depth == 1 { return moves.len() as u128 }
     let mut nodes: u128 = 0u128;
-    for mv in moves {
-        board.make(mv);
+    for mv in &moves {
+        board.make(*mv);
         nodes += _perft(board, depth - 1);
         board.unmake()
     }

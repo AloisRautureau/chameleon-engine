@@ -1,4 +1,5 @@
-use std::sync::Mutex;
+use arrayvec::ArrayVec;
+use spin::mutex::SpinMutex;
 use crate::{zob_hash::Hash, evaluation::Score, r#move::Move};
 
 #[derive(PartialEq, Debug, Clone, Copy)]
@@ -25,60 +26,71 @@ impl std::fmt::Display for SearchInfo {
     }
 }
 
-pub struct TranspositionTable (Vec<Mutex<(Option<SearchInfo>, Option<SearchInfo>)>>);
+pub const HASHTABLE_SIZE: usize = 2_usize.pow(16);
 
-impl TranspositionTable {
-    pub fn new(entries: usize) -> TranspositionTable {
-        let mut table = Vec::with_capacity(entries);
-        for _ in 0..entries {
-            table.push(Mutex::new((None, None)))
+// A shareable, thread safe, but lockless hashtable.
+// Instead, the locks are held by the entries
+pub struct HashTable<T: Copy + Sync> (ArrayVec<SpinMutex<Option<T>>, HASHTABLE_SIZE>);
+impl<T: Copy + Sync> HashTable<T> {
+    // Creating a hashtable already fills every single entry
+    pub fn new() -> Self {
+        let mut table = ArrayVec::new();
+        for _ in 0..HASHTABLE_SIZE {
+            table.push(SpinMutex::new(None))
         }
-        TranspositionTable (table)
+        HashTable (table)
+    }
+
+    /// Returns the lock to a given entry
+    pub fn get(&self, hash: Hash) -> &SpinMutex<Option<T>> {
+        let key = self.key_from_hash(&hash);
+        &self.0[key]
+    }
+
+    pub fn key_from_hash(&self, hash: &Hash) -> usize {
+        (hash % (HASHTABLE_SIZE as u64)) as usize
+    }
+}
+
+pub struct TranspositionTable (HashTable<(SearchInfo, Option<SearchInfo>)>);
+impl TranspositionTable {
+    pub fn new() -> Self {
+        TranspositionTable (HashTable::new())
     }
 
     pub fn get(&self, hash: Hash) -> Option<SearchInfo> {
-        let (depth_entry, young_entry) = if let Some(e) = self.0.get(self.key_from_hash(hash)) {
-            *e.lock().unwrap()
-        } else {
-            return None
-        };
-        if let Some(e) = depth_entry {
-            if e.position_hash == hash { return depth_entry }
+        let entry = *self.0.get(hash).lock();
+
+        let (depth_entry, young_entry) = entry?;
+
+        if depth_entry.position_hash == hash {
+            return Some(depth_entry)
         } else if let Some(e) = young_entry {
-            if e.position_hash == hash { return young_entry }
+            if e.position_hash == hash {
+                return young_entry
+            }
         }
         None
     }
 
     pub fn set(&self, hash: Hash, entry: SearchInfo) {
-        let mut entries = if let Some(e) = self.0.get(self.key_from_hash(hash)) {
-            e.lock().unwrap()
+        let entries = &mut *self.0.get(hash).lock();
+
+        let (depth_entry, young_entry) = if let Some(e) = entries {
+            e
         } else {
+            *entries = Some((entry, None));
             return;
         };
 
-        let depth_entry = &mut (*entries).0;
-
-        let place_in_depth = if let Some(e) = depth_entry {
-            Self::should_replace(&e, &entry)
+        if Self::should_replace(depth_entry, &entry) {
+            *depth_entry = entry;
         } else {
-            true
-        };
-
-        if place_in_depth {
-            *depth_entry = Some(entry);
-        } else {
-            //drop(depth_entry);
-            let young_entry = &mut (*entries).1;
             *young_entry = Some(entry);
         }
     }
 
     fn should_replace(old_info: &SearchInfo, new_info: &SearchInfo) -> bool {
         old_info.age != new_info.age || old_info.depth_searched <= new_info.depth_searched
-    }
-
-    fn key_from_hash(&self, hash: Hash) -> usize {
-        (hash % (self.0.capacity() as u64)) as usize
     }
 }

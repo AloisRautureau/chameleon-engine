@@ -89,7 +89,7 @@ pub struct SearchFramework {
 impl SearchFramework {
     pub fn new() -> SearchFramework {
         SearchFramework {
-            transposition_table: Arc::new(TranspositionTable::new(16384 * 2)),
+            transposition_table: Arc::new(TranspositionTable::new()),
             search_handle: None,
             search_result: None,
             stop_handle: None,
@@ -155,10 +155,10 @@ impl Search {
 
         // Main search worker
         let internal_position = position.clone();
-        let internal_options = options.clone();
+        let internal_options = options;
         let thread_result = Arc::clone(&result);
         let stop_signal = Arc::clone(&stop_handle);
-        let tt_handle = Arc::clone(&transposition_table);
+        let tt_handle = Arc::clone(transposition_table);
         let handle = thread::spawn(move || {
             Search::search_root(internal_position, internal_options, thread_result, tt_handle, true, stop_signal);
         });
@@ -214,10 +214,11 @@ impl Search {
             for mv in moves_iter {
                 if (context.should_stop)() { break }
                 let mut move_pv = VecDeque::with_capacity(context.total_depth as usize);
-                position.make(mv);
+                position.make(*mv);
                 let mut score = -Search::alpha_beta(&mut position, -beta, -alpha, context.total_depth - 1, &mut move_pv, &mut context);
                 // The score falls out of our aspiration window, therefore we widen it
                 if score <= alpha || score >= beta {
+                    println!("doing a research {} is out of [{}, {}]", score, alpha, beta);
                     if score <= alpha { aspiration_window.0 *= 2 } else { aspiration_window.1 *= 2 };
                     alpha = previous_iteration_score - aspiration_window.0;
                     beta = previous_iteration_score + aspiration_window.1;
@@ -231,10 +232,10 @@ impl Search {
                     Ok(i) => i,
                     Err(i) => i
                 };
-                iteration_mv_scores.insert(insertion_pos, (mv, score));
+                iteration_mv_scores.insert(insertion_pos, (*mv, score));
                 if insertion_pos == 0 {
                     iteration_pv = move_pv;
-                    iteration_pv.push_front(mv);
+                    iteration_pv.push_front(*mv);
                 }
             }
             context.pv = MoveList::from(iteration_pv);
@@ -255,7 +256,7 @@ impl Search {
             (*res).score = score;
             (*res).depth_reached = context.total_depth;
             (*res).time = start.elapsed();
-            (*res).principal_variation = context.pv;
+            (*res).principal_variation = context.pv.clone();
             (*res).nodes_searched = *context.nodes_searched;
 
             if print_uci {
@@ -293,18 +294,15 @@ impl Search {
         }
         // Futility pruning
         let enable_futility_pruning = !in_check && !position.last_was_capture();
-        if depth == 1 && enable_futility_pruning {
-            if Evaluation::shallow_eval(position).score + Evaluation::MIDGAME_PIECE_TYPE_VALUE[2] <= alpha {
+        if enable_futility_pruning {
+            let futility_margin = Evaluation::MIDGAME_PIECE_TYPE_VALUE[2];
+            let extended_futility_margin = Evaluation::MIDGAME_PIECE_TYPE_VALUE[3];
+            let razoring_margin = Evaluation::MIDGAME_PIECE_TYPE_VALUE[4];
+            if (depth == 1 && Evaluation::shallow_eval(position).score + futility_margin <= alpha)
+                || (depth == 2 && Evaluation::shallow_eval(position).score + extended_futility_margin <= alpha) {
                 return Self::quiescence(position, alpha, beta, context)
             }
-        }
-        if depth == 2 && enable_futility_pruning { // Extended
-            if Evaluation::shallow_eval(position).score + Evaluation::MIDGAME_PIECE_TYPE_VALUE[3] <= alpha {
-                return Self::quiescence(position, alpha, beta, context)
-            }
-        }
-        if depth == 3 && enable_futility_pruning { // Razoring
-            if Evaluation::shallow_eval(position).score + Evaluation::MIDGAME_PIECE_TYPE_VALUE[4] <= alpha {
+            else if depth == 3 && Evaluation::shallow_eval(position).score + razoring_margin <= alpha {
                 depth -= 1
             }
         }
@@ -329,14 +327,14 @@ impl Search {
         if moves.is_empty() { 
             return if in_check { -Evaluation::MATE_SCORE } else { Evaluation::DRAW_SCORE }
         }
-        let moves_iter = moves.best_first_iter(&Self::score_moves(&position, depth, &context));
+        let moves_iter = moves.best_first_iter(&Self::score_moves(position, depth, context));
 
         // PV search
         let mut search_pv = true;
 
         for (mv_index, mv) in moves_iter.enumerate() {
             let mut move_pv = VecDeque::with_capacity(depth as usize);
-            position.make(mv);
+            position.make(*mv);
             let mut score;
             if search_pv {
                 score = -Self::alpha_beta(position, -beta, -alpha, depth - 1, &mut move_pv, context);
@@ -361,28 +359,28 @@ impl Search {
             if score >= beta {
                 context.transposition_table.set(position.get_hash(), SearchInfo {
                     position_hash: position.get_hash(),
-                    best_move: Some(mv),
+                    best_move: Some(*mv),
                     depth_searched: depth,
                     score,
                     node_type: NodeType::Beta,
                     age: position.halfmove_clock() % 2 == 0
                 });
-                if context.killers[depth as usize].is_none() {
-                    context.killers[depth as usize] = Some(mv) 
+                if !mv.is_capture() {
+                    context.killers[(context.total_depth - depth) as usize] = Some(*mv)
                 }
                 return beta;
             } 
             if score > alpha {
                 context.transposition_table.set(position.get_hash(), SearchInfo {
                     position_hash: position.get_hash(),
-                    best_move: Some(mv),
+                    best_move: Some(*mv),
                     depth_searched: depth,
                     score,
                     node_type: NodeType::Exact,
                     age: position.halfmove_clock() % 2 == 0
                 });
                 *local_pv = move_pv;
-                local_pv.push_front(mv);
+                local_pv.push_front(*mv);
                 search_pv = false;
                 alpha = score
             }
@@ -409,12 +407,12 @@ impl Search {
         if (context.should_stop)() { return alpha }
 
         let captures = generate(position, GenType::Captures);
-        let moves_iter = captures.best_first_iter(&Self::score_quiescence(&position));
+        let moves_iter = captures.best_first_iter(&Self::score_quiescence(position));
 
         for mv in moves_iter {
-            if Evaluation::see(position, mv) <= 0 { break; }
+            if Evaluation::see(position, *mv) <= 0 { break; }
 
-            position.make(mv);
+            position.make(*mv);
             let score = -Self::quiescence(position, -beta, -alpha, context);
             position.unmake();
 
@@ -425,23 +423,25 @@ impl Search {
         alpha
     }
 
-    fn score_moves<'a>(board: &'a Board, depth: i32, context: &SearchContext) -> impl Fn(Move) -> Score + 'a {
-        let pv_move = context.pv.get((context.total_depth - depth) as usize);
-        let killer = context.killers[(context.total_depth - depth) as usize];
+    fn score_moves<'a>(board: &'a Board, depth: i32, context: &SearchContext) -> impl Fn(&Move) -> Score + 'a {
+        let pv_move = *context.pv.get((context.total_depth - depth) as usize).unwrap_or(&Move::NULL_MOVE);
+        let killer = context.killers[(context.total_depth - depth) as usize].unwrap_or(Move::NULL_MOVE);
         let hash_move = context.transposition_table
             .get(board.get_hash())
-            .map(|i| i.best_move.unwrap());
-        move |m| {
-            if Some(m) == pv_move { 1000000 }
-            else if Some(m) == hash_move { 100000 }
-            else if Some(m) == killer { 10000 }
-            else { Evaluation::see(&board, m) }
+            .map(|i| i.best_move.unwrap())
+            .unwrap_or(Move::NULL_MOVE);
+        move |&m| {
+            if m == pv_move   { 1000000 }
+            else if m == hash_move { 100000 }
+            else if m.is_capture() { Evaluation::see(board, m) + 1 }
+            else if m == killer    { 0 }
+            else { -10 }
         }
     }
 
-    fn score_quiescence<'a>(board: &'a Board) -> impl Fn(Move) -> Score + 'a {
-        move |m| {
-            Evaluation::see(&board, m)
+    fn score_quiescence(board: &Board) -> impl Fn(&Move) -> Score + '_ {
+        move |&m| {
+            Evaluation::see(board, m)
         }
     }
 }

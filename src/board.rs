@@ -128,7 +128,7 @@ impl Board {
 
     /// Given a string, makes the move if it is legal
     pub fn make_from_str(&mut self, move_str: &str) -> Result<(), String> {
-        let legal_moves = generate(&self, GenType::Legal);
+        let legal_moves = generate(self, GenType::Legal);
         let (origin, target, promotion_target) = if let Some(mv) = Move::parse(move_str) {
             mv
         } else {
@@ -136,7 +136,7 @@ impl Board {
         };
 
         if let Some(mv) = legal_moves.into_iter().find(|m| m.origin() == origin && m.target() == target && m.promotion_target() == promotion_target) {
-            self.make(mv);
+            self.make(*mv);
             Ok(())
         } else {
             Err(String::from("Illegal move"))
@@ -369,12 +369,9 @@ impl Board {
         (pinned_bb, pinners_bb)
     }
 
-    /// A simple iterator over material, each item being a piece type, and its associated bitboard
-    pub fn material_iter(&self, color: Color) -> impl Iterator<Item = (PieceType, &Bitboard)> {
-        self.bitboards[color as usize][0..6]
-            .iter()
-            .enumerate()
-            .map(|(i, bb)| (PieceType::from_determinant(i).unwrap(), bb))
+    /// A simple iterator over material, each item being a piece type index, and its associated bitboard
+    pub fn material_iter(&self, color: Color) -> impl Iterator<Item = &Bitboard> {
+        self.bitboards[color as usize][0..6].iter()
     }
 
     /*

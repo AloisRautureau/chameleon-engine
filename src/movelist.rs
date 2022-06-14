@@ -1,20 +1,36 @@
 use std::collections::VecDeque;
+use arrayvec::ArrayVec;
 use crate::r#move::Move;
 use crate::evaluation::Score;
 
 pub const MAX_MOVELIST_CAPACITY: usize = 256;
 
-#[derive(Clone, Copy)]
-pub struct MoveList {
-    moves: [Move; MAX_MOVELIST_CAPACITY],
-    len: usize
-}
+#[derive(Clone)]
+pub struct MoveList (ArrayVec<Move, MAX_MOVELIST_CAPACITY>);
 impl Default for MoveList {
     fn default() -> Self {
-        MoveList {
-            moves: [Move::NULL_MOVE; 256],
-            len: 0
-        }
+        MoveList (ArrayVec::new())
+    }
+}
+impl MoveList {
+    pub fn is_empty(&self) -> bool { self.0.is_empty() }
+    pub fn len(&self) -> usize { self.0.len() }
+    pub fn push(&mut self, m: Move) { 
+        self.0.push(m)
+    } 
+    pub fn get(&self, i: usize) -> Option<&Move> {
+        self.0.get(i)
+    }
+    pub fn pop_index(&mut self, i: usize) -> Option<Move> {
+        self.0.swap_pop(i)
+    }
+
+    pub fn best_first_iter<F: Fn(&Move) -> Score>(&self, scoring_function: &F) -> ScoredMoveListIter {
+        ScoredMoveListIter::new(&self, scoring_function)
+    }
+
+    pub fn iter(&self) -> MoveListIter {
+        MoveListIter::new(&self)
     }
 }
 impl From<Vec<Move>> for MoveList {
@@ -31,104 +47,85 @@ impl From<VecDeque<Move>> for MoveList {
         mv_list
     }
 }
-impl MoveList {
-    pub fn is_empty(&self) -> bool { self.len == 0 }
-    pub fn len(&self) -> usize { self.len }
-    pub fn push(&mut self, m: Move) { 
-        self.moves[self.len] = m;
-        self.len += 1;
-    } 
-    pub fn get(&self, i: usize) -> Option<Move> {
-        if i >= self.len { None }
-        else { Some(self.moves[i]) }
-    }
-    pub fn pop_index(&mut self, i: usize) -> Option<Move> {
-        let m = self.get(i);
-        self.len -= 1;
-        self.moves[i] = self.moves[self.len];
-        m
-    }
-
-    pub fn best_first_iter<F: Fn(Move) -> Score>(&self, scoring_function: &F) -> ScoredMoveListIterator {
-        ScoredMoveListIterator::new(*self, scoring_function)
-    }
-}
-impl IntoIterator for MoveList {
-    type Item = Move;
-    type IntoIter = MoveListIterator;
-
-    fn into_iter(self) -> Self::IntoIter {
-        MoveListIterator::new(self)
-    }
-}
 impl std::fmt::Display for MoveList {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         let mut s = String::new();
-        for m in self.into_iter() {
+        for m in self.0.iter() {
             s.push_str(&format!("{} ", m))
         }
         write!(f, "{}", s.trim())
     }
 }
+impl<'a> IntoIterator for &'a MoveList {
+    type Item= &'a Move;
+    type IntoIter = MoveListIter<'a>;
 
-// Basic array iterator
-pub struct MoveListIterator {
-    inner: MoveList,
-    idx: usize
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
 }
-impl MoveListIterator {
-    fn new(inner: MoveList) -> Self {
-        MoveListIterator {
-            inner,
-            idx: 0
+
+pub struct MoveListIter<'a> {
+    inner: &'a MoveList,
+    ix: usize,
+}
+impl<'a> MoveListIter<'a> {
+    pub fn new(move_list: &'a MoveList) -> Self {
+        MoveListIter {
+            inner: move_list,
+            ix: 0
         }
     }
 }
-impl Iterator for MoveListIterator {
-    type Item = Move; 
+impl<'a> Iterator for MoveListIter<'a> {
+    type Item = &'a Move;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.idx += 1;
-        self.inner.get(self.idx - 1)
+        if self.ix >= self.inner.len() { None }
+        else {
+            self.ix += 1;
+            self.inner.get(self.ix - 1)
+        }
     }
 }
 
 // A way to iterate through a movelist while scoring
 // moves, to potentially reduce search space
-pub struct ScoredMoveListIterator {
-    inner: MoveList,
-    scores: [Score; MAX_MOVELIST_CAPACITY]
+pub struct ScoredMoveListIter<'a> {
+    moves: ArrayVec <&'a Move, MAX_MOVELIST_CAPACITY>,
+    scores: ArrayVec <Score, MAX_MOVELIST_CAPACITY>
 }
-impl ScoredMoveListIterator {
-    pub fn new<F: Fn(Move) -> Score>(moves: MoveList, scoring_function: &F) -> ScoredMoveListIterator {
-        let mut scores = [0; MAX_MOVELIST_CAPACITY];
-        for i in 0..moves.len() {
-            scores[i] = scoring_function(moves.get(i).unwrap());
+impl<'a> ScoredMoveListIter<'a> {
+    pub fn new<F: Fn(&Move) -> Score>(move_list: &'a MoveList, scoring_function: &F) -> Self {
+        let mut moves = ArrayVec::new();
+        let mut scores = ArrayVec::new();
+        for mv in move_list {
+            let score = scoring_function(mv);
+            scores.push(score);
+            moves.push(mv);
         }
-        ScoredMoveListIterator {
-            inner: moves,
+        ScoredMoveListIter {
+            moves,
             scores
         }
     }
 }
-impl Iterator for ScoredMoveListIterator {
-    type Item = Move;
+impl<'a> Iterator for ScoredMoveListIter<'a> {
+    type Item = &'a Move;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.inner.len() == 0 { None }
-        else {
-            let mut ix = 0;
-            let mut s = -i32::MAX;
-    
-            for i in 0..self.inner.len() {
-                if self.scores[i] > s {
-                    s = self.scores[i];
-                    ix = i;
-                }
+        if self.moves.is_empty() { return None }
+        let (mut best_index, mut best_score) = (0, self.scores[0]);
+        let mut i = 0;
+        for s in &self.scores {
+            if *s > best_score {
+                best_score = *s;
+                best_index = i;
             }
-            
-            self.scores[ix] = self.scores[self.inner.len() - 1];
-            self.inner.pop_index(ix)
+            i += 1;
         }
+
+        self.scores.swap_pop(best_index);
+        self.moves.swap_pop(best_index)
     }
 }

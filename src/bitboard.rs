@@ -11,6 +11,7 @@ include!(concat!(env!("OUT_DIR"), "/lookup.rs"));
 pub struct Bitboard(pub u64);
 
 
+
 impl Bitboard {
     pub fn from_square(square: usize) -> Bitboard { Bitboard(1u64 << square) }
     pub fn from_squares(squares: &[usize]) -> Bitboard {
@@ -26,15 +27,34 @@ impl Bitboard {
     pub fn unset(&mut self, sq: usize) { self.0 &= !(1 << sq) }
 
     pub fn ls1b(&self) -> usize {
-        self.0.trailing_zeros() as usize
+        if cfg!(target_feature = "bmi1") {
+            self.0.trailing_zeros() as usize
+        } else {
+            // Uses De Bruijn bitscan forward, which might be faster on some
+            // CPU's which don't have the BMI set.
+            Self::DEBRUIJN_INDEX[(((self.0 & -(self.0 as i64) as u64) * Self::DEBRUIJN_64) >> 58) as usize]
+        }
     }
+
+    const DEBRUIJN_64: u64 = 0x03f79d71b4cb0a89;
+    const DEBRUIJN_INDEX: [usize; 64] = [
+        0,  1, 48,  2, 57, 49, 28,  3,
+        61, 58, 50, 42, 38, 29, 17,  4,
+        62, 55, 59, 36, 53, 51, 43, 22,
+        45, 39, 33, 30, 24, 18, 12,  5,
+        63, 47, 56, 27, 60, 41, 37, 16,
+        54, 35, 52, 21, 44, 32, 23, 11,
+        46, 26, 40, 15, 34, 20, 31, 10,
+        25, 14, 19,  9, 13,  8,  7,  6
+    ];
+
     pub fn ms1b(&self) -> usize {
         63 - self.0.leading_zeros() as usize
     }
 
     pub fn vertical_flip(&self) -> Bitboard { Bitboard(self.0.swap_bytes()) }
 
-    pub fn pop_ls1b(&mut self) { self.0 &= self.0 - 1 }
+    pub fn reset_ls1b(&mut self) { self.0 &= self.0 - 1 }
 
     pub fn pop_count(&self) -> u32 { self.0.count_ones() }
 
@@ -277,7 +297,7 @@ impl Iterator for Bitboard {
         if self.0 == 0u64 { None }
         else {
             let sq = self.ls1b();
-            self.pop_ls1b();
+            self.reset_ls1b();
             Some(sq)
         }
     }

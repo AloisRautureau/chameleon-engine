@@ -90,7 +90,7 @@ impl Move {
         }
     }
 
-    pub fn is_capture(&self) -> bool { self.0 & 0b100 != 0 }
+    pub fn is_capture(&self) -> bool { self.0 & 0b100 != 0 && *self != Self::NULL_MOVE }
 
     pub fn promotion_target(&self) -> Option<PieceType> {
         match self.flags() {

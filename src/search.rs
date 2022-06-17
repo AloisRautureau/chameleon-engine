@@ -1,17 +1,17 @@
-use std::fmt::Display;
-use std::time::{Duration, Instant};
-use std::sync::{Mutex, Arc};
-use std::thread::{self, JoinHandle};
 use std::collections::VecDeque;
+use std::fmt::Display;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant};
 
 use crate::board::Board;
-use crate::r#move::Move;
-use crate::evaluation::{Score, Evaluation};
+use crate::evaluation::{Evaluation, Score};
 use crate::move_generator::{generate, GenType};
-use crate::transposition_table::{TranspositionTable, SearchInfo, NodeType};
-use crate::uci::{UCI, UCICommand};
 use crate::movelist::MoveList;
+use crate::r#move::Move;
+use crate::transposition_table::{NodeType, SearchInfo, TranspositionTable};
+use crate::uci::{UCICommand, UCI};
 
 /// A struct to group together every search option available in the UCI
 /// protocol.
@@ -38,7 +38,7 @@ impl SearchOptions {
     ) -> SearchOptions {
         let mut move_time = None;
         if max_time.is_none() {
-            if let Some(c) = clock { 
+            if let Some(c) = clock {
                 move_time = Some(Self::get_movetime(c, increment))
             }
         } else {
@@ -51,15 +51,17 @@ impl SearchOptions {
             moves_until_time_control,
             max_depth,
             max_nodes,
-            max_time: move_time
+            max_time: move_time,
         }
     }
 
     fn get_movetime(clock: Duration, increment: Option<Duration>) -> Duration {
-        let mut movetime = clock/50;
+        let mut movetime = clock / 50;
         if let Some(inc) = increment {
-            movetime += inc/2;
-            if movetime <= Duration::ZERO { return clock }
+            movetime += inc / 2;
+            if movetime <= Duration::ZERO {
+                return clock;
+            }
         }
 
         movetime
@@ -73,7 +75,7 @@ impl Default for SearchOptions {
             moves_until_time_control: None,
             max_depth: None,
             max_nodes: None,
-            max_time: None
+            max_time: None,
         }
     }
 }
@@ -84,7 +86,7 @@ pub struct SearchFramework {
     transposition_table: Arc<TranspositionTable>,
     search_handle: Option<JoinHandle<()>>,
     search_result: Option<Arc<Mutex<Search>>>,
-    stop_handle: Option<Arc<AtomicBool>>
+    stop_handle: Option<Arc<AtomicBool>>,
 }
 impl SearchFramework {
     pub fn new() -> SearchFramework {
@@ -97,14 +99,18 @@ impl SearchFramework {
     }
 
     pub fn run_search(&mut self, position: &Board, options: SearchOptions) {
-        let (search_handle, stop_handle, search_result) = Search::new(position, options, &self.transposition_table);
+        let (search_handle, stop_handle, search_result) =
+            Search::new(position, options, &self.transposition_table);
         self.search_handle = Some(search_handle);
         self.search_result = Some(search_result);
         self.stop_handle = Some(stop_handle);
     }
 
     pub fn stop_search(&mut self) -> Option<Search> {
-        self.stop_handle.as_ref().unwrap().store(true, Ordering::SeqCst);
+        self.stop_handle
+            .as_ref()
+            .unwrap()
+            .store(true, Ordering::SeqCst);
         self.search_handle = None;
         match &self.search_result {
             Some(arc_mutex) => {
@@ -112,7 +118,7 @@ impl SearchFramework {
                 self.search_result = None;
                 Some(result)
             }
-            None => None
+            None => None,
         }
     }
 
@@ -121,7 +127,6 @@ impl SearchFramework {
         self.transposition_table.get(hash)
     }
 }
-
 
 #[derive(Clone)]
 pub struct Search {
@@ -139,7 +144,7 @@ struct SearchContext<'a> {
     pub total_depth: i32,
     pub null_allowed: bool,
     pub nodes_searched: &'a mut u128,
-    pub should_stop: &'a (dyn Fn() -> bool)
+    pub should_stop: &'a (dyn Fn() -> bool),
 }
 impl Search {
     const INFINITY: i32 = i32::MAX;
@@ -149,7 +154,11 @@ impl Search {
     /// Runs a new search with the given options, returning a handle to the thread running said
     /// search, as well as a mutex holding the result
     /// TODO: This might be more properly done by using async programming patterns
-    pub fn new(position: &Board, options: SearchOptions, transposition_table: &Arc<TranspositionTable>) -> (JoinHandle<()>, Arc<AtomicBool>, Arc<Mutex<Search>>) {
+    pub fn new(
+        position: &Board,
+        options: SearchOptions,
+        transposition_table: &Arc<TranspositionTable>,
+    ) -> (JoinHandle<()>, Arc<AtomicBool>, Arc<Mutex<Search>>) {
         let result = Arc::new(Mutex::new(Search::default()));
         let stop_handle = Arc::new(AtomicBool::new(false));
 
@@ -160,7 +169,14 @@ impl Search {
         let stop_signal = Arc::clone(&stop_handle);
         let tt_handle = Arc::clone(transposition_table);
         let handle = thread::spawn(move || {
-            Search::search_root(internal_position, internal_options, thread_result, tt_handle, true, stop_signal);
+            Search::search_root(
+                internal_position,
+                internal_options,
+                thread_result,
+                tt_handle,
+                true,
+                stop_signal,
+            );
         });
 
         (handle, stop_handle, result)
@@ -168,18 +184,30 @@ impl Search {
 
     /// Searches a given position, writing the results as it goes in a mutex
     /// It also sends information in the form of UCI commands during the search
-    fn search_root(mut position: Board, options: SearchOptions, result: Arc<Mutex<Search>>, transposition_table: Arc<TranspositionTable>, print_uci: bool, stop_signal: Arc<AtomicBool>) {
+    fn search_root(
+        mut position: Board,
+        options: SearchOptions,
+        result: Arc<Mutex<Search>>,
+        transposition_table: Arc<TranspositionTable>,
+        print_uci: bool,
+        stop_signal: Arc<AtomicBool>,
+    ) {
         let mut nodes = 0u128;
 
         let start = Instant::now();
         let stop_func = move || {
-            if stop_signal.load(Ordering::SeqCst) { true }
-            else if !options.infinite {
+            if stop_signal.load(Ordering::SeqCst) {
+                true
+            } else if !options.infinite {
                 if let Some(duration) = options.max_time {
-                    if start.elapsed() > duration { return true }
+                    if start.elapsed() > duration {
+                        return true;
+                    }
                 }
                 if let Some(mn) = options.max_nodes {
-                    if nodes > mn { return true }
+                    if nodes > mn {
+                        return true;
+                    }
                 }
                 false
             } else {
@@ -193,7 +221,7 @@ impl Search {
             total_depth: 1,
             null_allowed: true,
             nodes_searched: &mut nodes,
-            should_stop: &stop_func
+            should_stop: &stop_func,
         };
 
         let mut root_moves = if let Some(moves) = options.moves_to_search {
@@ -202,36 +230,62 @@ impl Search {
             generate(&position, GenType::Legal)
         };
 
-        let (mut alpha, mut beta) = (-Evaluation::MATE_SCORE-1, Evaluation::MATE_SCORE+1);
+        let (mut alpha, mut beta) = (-Evaluation::MATE_SCORE - 1, Evaluation::MATE_SCORE + 1);
 
-        let mut previous_iteration_score = -Evaluation::MATE_SCORE-1;
-        while !(context.should_stop)() && context.total_depth <= options.max_depth.unwrap_or(Self::MAX_DEPTH) {
-            let mut aspiration_window = (previous_iteration_score - Self::BASE_WINDOW, previous_iteration_score + Self::BASE_WINDOW);
+        let mut previous_iteration_score = -Evaluation::MATE_SCORE - 1;
+        while !(context.should_stop)()
+            && context.total_depth <= options.max_depth.unwrap_or(Self::MAX_DEPTH)
+        {
+            let mut aspiration_window = (
+                previous_iteration_score - Self::BASE_WINDOW,
+                previous_iteration_score + Self::BASE_WINDOW,
+            );
             let mut iteration_pv = VecDeque::with_capacity(context.total_depth as usize);
             let mut iteration_mv_scores: Vec<(Move, Score)> = Vec::with_capacity(root_moves.len());
             let moves_iter = root_moves.into_iter();
 
             for mv in moves_iter {
-                if (context.should_stop)() { break }
+                if (context.should_stop)() {
+                    break;
+                }
                 let mut move_pv = VecDeque::with_capacity(context.total_depth as usize);
                 position.make(*mv);
-                let mut score = -Search::alpha_beta(&mut position, -beta, -alpha, context.total_depth - 1, &mut move_pv, &mut context);
+                let mut score = -Search::alpha_beta(
+                    &mut position,
+                    -beta,
+                    -alpha,
+                    context.total_depth - 1,
+                    &mut move_pv,
+                    &mut context,
+                );
                 // The score falls out of our aspiration window, therefore we widen it
                 if score <= alpha || score >= beta {
                     println!("doing a research {} is out of [{}, {}]", score, alpha, beta);
-                    if score <= alpha { aspiration_window.0 *= 2 } else { aspiration_window.1 *= 2 };
+                    if score <= alpha {
+                        aspiration_window.0 *= 2
+                    } else {
+                        aspiration_window.1 *= 2
+                    };
                     alpha = previous_iteration_score - aspiration_window.0;
                     beta = previous_iteration_score + aspiration_window.1;
-                    score = -Search::alpha_beta(&mut position, -beta, -alpha, context.total_depth - 1, &mut move_pv, &mut context);
+                    score = -Search::alpha_beta(
+                        &mut position,
+                        -beta,
+                        -alpha,
+                        context.total_depth - 1,
+                        &mut move_pv,
+                        &mut context,
+                    );
                 }
                 position.unmake();
 
                 // Insertion  of the move while keeping everything sorted
                 // to reuse the ordering in the next iteration
-                let insertion_pos = match iteration_mv_scores.binary_search_by(|(_, s)| score.cmp(s)) {
-                    Ok(i) => i,
-                    Err(i) => i
-                };
+                let insertion_pos =
+                    match iteration_mv_scores.binary_search_by(|(_, s)| score.cmp(s)) {
+                        Ok(i) => i,
+                        Err(i) => i,
+                    };
                 iteration_mv_scores.insert(insertion_pos, (*mv, score));
                 if insertion_pos == 0 {
                     iteration_pv = move_pv;
@@ -240,16 +294,21 @@ impl Search {
             }
             context.pv = MoveList::from(iteration_pv);
 
-            let (mv, score) = *iteration_mv_scores.first().expect("Tried searching a mated position");
+            let (mv, score) = *iteration_mv_scores
+                .first()
+                .expect("Tried searching a mated position");
 
-            context.transposition_table.set(position.get_hash(), SearchInfo {
-                position_hash: position.get_hash(),
-                best_move: Some(mv),
-                depth_searched: context.total_depth,
-                score,
-                node_type: NodeType::Exact,
-                age: position.halfmove_clock() % 2 == 0
-            });
+            context.transposition_table.set(
+                position.get_hash(),
+                SearchInfo {
+                    position_hash: position.get_hash(),
+                    best_move: Some(mv),
+                    depth_searched: context.total_depth,
+                    score,
+                    node_type: NodeType::Exact,
+                    age: position.halfmove_clock() % 2 == 0,
+                },
+            );
 
             let mut res = result.lock().unwrap();
             (*res).best_move = Some(mv);
@@ -272,25 +331,40 @@ impl Search {
             }
             context.total_depth += 1;
 
-            if (context.should_stop)() { break }
+            if (context.should_stop)() {
+                break;
+            }
         }
 
         let res = result.lock().unwrap();
         if print_uci {
-            UCI::send(UCICommand::BestMove((*res).best_move.expect("Tried searching a mated position")))
+            UCI::send(UCICommand::BestMove(
+                (*res).best_move.expect("Tried searching a mated position"),
+            ))
         }
     }
 
     /// The core alpha beta function
-    fn alpha_beta(position: &mut Board, mut alpha: Score, beta: Score, mut depth: i32, local_pv: &mut VecDeque<Move>, context: &mut SearchContext) -> Score {
+    fn alpha_beta(
+        position: &mut Board,
+        mut alpha: Score,
+        beta: Score,
+        mut depth: i32,
+        local_pv: &mut VecDeque<Move>,
+        context: &mut SearchContext,
+    ) -> Score {
         *context.nodes_searched += 1;
 
-        if Evaluation::is_drawn(position) { return Evaluation::DRAW_SCORE }
+        if Evaluation::is_drawn(position) {
+            return Evaluation::DRAW_SCORE;
+        }
         let in_check = position.in_check(position.side_to_move());
-        if in_check { depth += 1 } // Check extension to avoid horizon effect
+        if in_check {
+            depth += 1
+        } // Check extension to avoid horizon effect
 
         if depth <= 0 || (context.should_stop)() {
-            return Self::quiescence(position, alpha, beta, context)
+            return Self::quiescence(position, alpha, beta, context);
         }
         // Futility pruning
         let enable_futility_pruning = !in_check && !position.last_was_capture();
@@ -299,10 +373,13 @@ impl Search {
             let extended_futility_margin = Evaluation::MIDGAME_PIECE_TYPE_VALUE[3];
             let razoring_margin = Evaluation::MIDGAME_PIECE_TYPE_VALUE[4];
             if (depth == 1 && Evaluation::shallow_eval(position).score + futility_margin <= alpha)
-                || (depth == 2 && Evaluation::shallow_eval(position).score + extended_futility_margin <= alpha) {
-                return Self::quiescence(position, alpha, beta, context)
-            }
-            else if depth == 3 && Evaluation::shallow_eval(position).score + razoring_margin <= alpha {
+                || (depth == 2
+                    && Evaluation::shallow_eval(position).score + extended_futility_margin <= alpha)
+            {
+                return Self::quiescence(position, alpha, beta, context);
+            } else if depth == 3
+                && Evaluation::shallow_eval(position).score + razoring_margin <= alpha
+            {
                 depth -= 1
             }
         }
@@ -316,16 +393,25 @@ impl Search {
             };
             context.null_allowed = false;
             position.make(Move::NULL_MOVE);
-            let score = -Self::alpha_beta(position, -beta, -beta+1, reduced_depth, local_pv, context);
+            let score =
+                -Self::alpha_beta(position, -beta, -beta + 1, reduced_depth, local_pv, context);
             position.unmake();
 
-            if score >= beta { return score }
+            if score >= beta {
+                return score;
+            }
         }
-        if !context.null_allowed { context.null_allowed = true }
+        if !context.null_allowed {
+            context.null_allowed = true
+        }
 
         let moves = generate(position, GenType::Legal);
-        if moves.is_empty() { 
-            return if in_check { -Evaluation::MATE_SCORE } else { Evaluation::DRAW_SCORE }
+        if moves.is_empty() {
+            return if in_check {
+                -Evaluation::MATE_SCORE
+            } else {
+                Evaluation::DRAW_SCORE
+            };
         }
         let moves_iter = moves.best_first_iter(&Self::score_moves(position, depth, context));
 
@@ -337,7 +423,8 @@ impl Search {
             position.make(*mv);
             let mut score;
             if search_pv {
-                score = -Self::alpha_beta(position, -beta, -alpha, depth - 1, &mut move_pv, context);
+                score =
+                    -Self::alpha_beta(position, -beta, -alpha, depth - 1, &mut move_pv, context);
             } else {
                 // Late Move Reduction scheme
                 let allow_reduction = mv_index > 4 && !in_check && depth <= 3 && !mv.is_capture();
@@ -348,37 +435,57 @@ impl Search {
                 } else {
                     depth - 1
                 };
-                score = -Self::alpha_beta(position, -alpha-1, -alpha, depth_to_search, &mut move_pv, context);
+                score = -Self::alpha_beta(
+                    position,
+                    -alpha - 1,
+                    -alpha,
+                    depth_to_search,
+                    &mut move_pv,
+                    context,
+                );
                 // If score is better than alpha, re-search at full depth in case
                 // we missed something
                 if score > alpha {
-                    score = -Self::alpha_beta(position, -beta, -alpha, depth - 1, &mut move_pv, context);
+                    score = -Self::alpha_beta(
+                        position,
+                        -beta,
+                        -alpha,
+                        depth - 1,
+                        &mut move_pv,
+                        context,
+                    );
                 }
             }
             position.unmake();
             if score >= beta {
-                context.transposition_table.set(position.get_hash(), SearchInfo {
-                    position_hash: position.get_hash(),
-                    best_move: Some(*mv),
-                    depth_searched: depth,
-                    score,
-                    node_type: NodeType::Beta,
-                    age: position.halfmove_clock() % 2 == 0
-                });
+                context.transposition_table.set(
+                    position.get_hash(),
+                    SearchInfo {
+                        position_hash: position.get_hash(),
+                        best_move: Some(*mv),
+                        depth_searched: depth,
+                        score,
+                        node_type: NodeType::Beta,
+                        age: position.halfmove_clock() % 2 == 0,
+                    },
+                );
                 if !mv.is_capture() {
                     context.killers[(context.total_depth - depth) as usize] = Some(*mv)
                 }
                 return beta;
-            } 
+            }
             if score > alpha {
-                context.transposition_table.set(position.get_hash(), SearchInfo {
-                    position_hash: position.get_hash(),
-                    best_move: Some(*mv),
-                    depth_searched: depth,
-                    score,
-                    node_type: NodeType::Exact,
-                    age: position.halfmove_clock() % 2 == 0
-                });
+                context.transposition_table.set(
+                    position.get_hash(),
+                    SearchInfo {
+                        position_hash: position.get_hash(),
+                        best_move: Some(*mv),
+                        depth_searched: depth,
+                        score,
+                        node_type: NodeType::Exact,
+                        age: position.halfmove_clock() % 2 == 0,
+                    },
+                );
                 *local_pv = move_pv;
                 local_pv.push_front(*mv);
                 search_pv = false;
@@ -391,68 +498,110 @@ impl Search {
 
     /// A special search that tries to find a quiet position in order to reduce the
     /// horizon effect
-    fn quiescence(position: &mut Board, mut alpha: Score, beta: Score, context: &mut SearchContext) -> Score {
+    fn quiescence(
+        position: &mut Board,
+        mut alpha: Score,
+        beta: Score,
+        context: &mut SearchContext,
+    ) -> Score {
         if generate(position, GenType::Legal).is_empty() {
-            return if position.in_check(position.side_to_move()) { -Evaluation::MATE_SCORE } else { Evaluation::DRAW_SCORE }
+            return if position.in_check(position.side_to_move()) {
+                -Evaluation::MATE_SCORE
+            } else {
+                Evaluation::DRAW_SCORE
+            };
         }
 
         let mut evaluation = Evaluation::shallow_eval(position);
-        if evaluation.is_drawn { return evaluation.score; }
+        if evaluation.is_drawn {
+            return evaluation.score;
+        }
 
-        if evaluation.score >= beta { return beta }
-        if evaluation.score < alpha - Evaluation::MIDGAME_PIECE_TYPE_VALUE[4] { return alpha }
+        if evaluation.score >= beta {
+            return beta;
+        }
+        if evaluation.score < alpha - Evaluation::MIDGAME_PIECE_TYPE_VALUE[4] {
+            return alpha;
+        }
 
         evaluation.deep_eval(position);
-        if alpha < evaluation.score { alpha = evaluation.score }
-        if (context.should_stop)() { return alpha }
+        if alpha < evaluation.score {
+            alpha = evaluation.score
+        }
+        if (context.should_stop)() {
+            return alpha;
+        }
 
         let captures = generate(position, GenType::Captures);
         let moves_iter = captures.best_first_iter(&Self::score_quiescence(position));
 
         for mv in moves_iter {
-            if Evaluation::see(position, *mv) <= 0 { break; }
+            if Evaluation::see(position, *mv) <= 0 {
+                break;
+            }
 
             position.make(*mv);
             let score = -Self::quiescence(position, -beta, -alpha, context);
             position.unmake();
 
-            if score >= beta { return beta }
-            if score > alpha { alpha = score }
+            if score >= beta {
+                return beta;
+            }
+            if score > alpha {
+                alpha = score
+            }
         }
 
         alpha
     }
 
-    fn score_moves<'a>(board: &'a Board, depth: i32, context: &SearchContext) -> impl Fn(&Move) -> Score + 'a {
-        let pv_move = *context.pv.get((context.total_depth - depth) as usize).unwrap_or(&Move::NULL_MOVE);
-        let killer = context.killers[(context.total_depth - depth) as usize].unwrap_or(Move::NULL_MOVE);
-        let hash_move = context.transposition_table
+    fn score_moves<'a>(
+        board: &'a Board,
+        depth: i32,
+        context: &SearchContext,
+    ) -> impl Fn(&Move) -> Score + 'a {
+        let pv_move = *context
+            .pv
+            .get((context.total_depth - depth) as usize)
+            .unwrap_or(&Move::NULL_MOVE);
+        let killer =
+            context.killers[(context.total_depth - depth) as usize].unwrap_or(Move::NULL_MOVE);
+        let hash_move = context
+            .transposition_table
             .get(board.get_hash())
             .map(|i| i.best_move.unwrap())
             .unwrap_or(Move::NULL_MOVE);
         move |&m| {
-            if m == pv_move   { 1000000 }
-            else if m == hash_move { 100000 }
-            else if m.is_capture() { Evaluation::see(board, m) + 1 }
-            else if m == killer    { 0 }
-            else { -10 }
+            if m == pv_move {
+                1000000
+            } else if m == hash_move {
+                100000
+            } else if m.is_capture() {
+                Evaluation::see(board, m) + 1
+            } else if m == killer {
+                0
+            } else {
+                -10
+            }
         }
     }
 
     fn score_quiescence(board: &Board) -> impl Fn(&Move) -> Score + '_ {
-        move |&m| {
-            Evaluation::see(board, m)
-        }
+        move |&m| Evaluation::see(board, m)
     }
 }
 impl Display for Search {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mate_score = self.score <= -Evaluation::MATE_SCORE || self.score >= Evaluation::MATE_SCORE;
+        let mate_score =
+            self.score <= -Evaluation::MATE_SCORE || self.score >= Evaluation::MATE_SCORE;
         write!(
-            f, "depth {} time {} nodes {} nps {} pv {} score {} {}",
-            self.depth_reached, self.time.as_millis(),
-            self.nodes_searched, ((self.nodes_searched as f64)/self.time.as_secs_f64()) as u64, 
-            self.principal_variation, 
+            f,
+            "depth {} time {} nodes {} nps {} pv {} score {} {}",
+            self.depth_reached,
+            self.time.as_millis(),
+            self.nodes_searched,
+            ((self.nodes_searched as f64) / self.time.as_secs_f64()) as u64,
+            self.principal_variation,
             if mate_score { "mate" } else { "cp" },
             if mate_score {
                 if self.score < 0 {
@@ -460,7 +609,9 @@ impl Display for Search {
                 } else {
                     self.principal_variation.len() as i32
                 }
-            } else { self.score }
+            } else {
+                self.score
+            }
         )
     }
 }

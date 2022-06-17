@@ -1,16 +1,18 @@
-use criterion::{criterion_group, criterion_main, Criterion};
 use chameleon::board::Board;
-use chameleon::move_generator::{GenType, generate};
+use chameleon::move_generator::{generate, GenType};
+use criterion::{criterion_group, criterion_main, Criterion};
 
 // A pure perft function, with no node counting, simply make/unmake and
 // move generation
 fn perft(board: &mut Board, depth: u64) {
-   if depth == 0 { return }
-   for m in &generate(board, GenType::Legal) {
-       board.make(*m);
-       perft(board, depth - 1);
-       board.unmake();
-   }
+    if depth == 0 {
+        return;
+    }
+    for m in &generate(board, GenType::Legal) {
+        board.make(*m);
+        perft(board, depth - 1);
+        board.unmake();
+    }
 }
 
 fn perft_bench(c: &mut Criterion) {

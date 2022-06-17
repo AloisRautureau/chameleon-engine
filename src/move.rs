@@ -1,7 +1,7 @@
-use std::fmt::{Display, Formatter};
-use crate::piece::{PieceType, Color};
 use crate::piece::PieceType::{Bishop, Knight, Queen, Rook};
-use crate::square::{Square, square_representation, self};
+use crate::piece::{Color, PieceType};
+use crate::square::{self, square_representation, Square};
+use std::fmt::{Display, Formatter};
 
 /// Moves are stored as a 2bytes word, with the following alignment:
 /// - 6*2 bits for origin and destination square
@@ -27,24 +27,29 @@ impl Move {
         Self::new(origin as u16, target as u16, 0b101)
     }
     pub fn new_kingside_castle(color: Color) -> Move {
-        match color { 
+        match color {
             Color::White => Move(4194),
-            Color::Black => Move(62434)
+            Color::Black => Move(62434),
         }
     }
     pub fn new_queenside_castle(color: Color) -> Move {
         match color {
             Color::White => Move(4131),
-            Color::Black => Move(62371)
+            Color::Black => Move(62371),
         }
     }
     pub fn new_promotion(origin: Square, target: Square, promote_to: PieceType) -> Move {
-        Self::new(origin as u16, target as u16, 0b1000 | match promote_to {
-            PieceType::Knight => 0b00,
-            PieceType::Bishop => 0b01,
-            PieceType::Rook => 0b10,
-            _ => 0b11,
-        })
+        Self::new(
+            origin as u16,
+            target as u16,
+            0b1000
+                | match promote_to {
+                    PieceType::Knight => 0b00,
+                    PieceType::Bishop => 0b01,
+                    PieceType::Rook => 0b10,
+                    _ => 0b11,
+                },
+        )
     }
     pub fn all_promotions(origin: Square, target: Square) -> [Move; 4] {
         [
@@ -55,12 +60,17 @@ impl Move {
         ]
     }
     pub fn new_promotion_capture(origin: Square, target: Square, promote_to: PieceType) -> Move {
-        Self::new(origin as u16, target as u16, 0b1100 | match promote_to {
-            PieceType::Knight => 0b00,
-            PieceType::Bishop => 0b01,
-            PieceType::Rook => 0b10,
-            _ => 0b11,
-        })
+        Self::new(
+            origin as u16,
+            target as u16,
+            0b1100
+                | match promote_to {
+                    PieceType::Knight => 0b00,
+                    PieceType::Bishop => 0b01,
+                    PieceType::Rook => 0b10,
+                    _ => 0b11,
+                },
+        )
     }
     pub fn all_promotion_captures(origin: Square, target: Square) -> [Move; 4] {
         [
@@ -93,16 +103,18 @@ impl Move {
             0b1101 => MoveFlags::PromotionCapture(PieceType::Bishop),
             0b1110 => MoveFlags::PromotionCapture(PieceType::Rook),
             0b1111 => MoveFlags::PromotionCapture(PieceType::Queen),
-            _ => MoveFlags::Quiet
+            _ => MoveFlags::Quiet,
         }
     }
 
-    pub fn is_capture(&self) -> bool { self.0 & 0b100 != 0 && *self != Self::NULL_MOVE }
+    pub fn is_capture(&self) -> bool {
+        self.0 & 0b100 != 0 && *self != Self::NULL_MOVE
+    }
 
     pub fn promotion_target(&self) -> Option<PieceType> {
         match self.flags() {
             MoveFlags::Promotion(p) | MoveFlags::PromotionCapture(p) => Some(p),
-            _ => None
+            _ => None,
         }
     }
 
@@ -119,9 +131,11 @@ impl Move {
                 "n" => Some(PieceType::Knight),
                 "r" => Some(PieceType::Rook),
                 "q" => Some(PieceType::Queen),
-                _ => None
+                _ => None,
             }
-        } else { None };
+        } else {
+            None
+        };
         Some((origin, target, promotion_target))
     }
 }
@@ -147,5 +161,5 @@ pub enum MoveFlags {
     Capture,
     EnPassant,
     Promotion(PieceType),
-    PromotionCapture(PieceType)
+    PromotionCapture(PieceType),
 }

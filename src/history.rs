@@ -9,5 +9,5 @@ pub struct HistoryEntry {
     pub captured_piece: Option<Piece>,
     pub ep_target: Option<Square>,
     pub castling_rights: CastlingRights,
-    pub reversible_moves: u32
+    pub reversible_moves: u32,
 }

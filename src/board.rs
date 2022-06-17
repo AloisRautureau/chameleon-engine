@@ -1,14 +1,14 @@
-use std::fmt::{Display, Formatter};
 use crate::bitboard::Bitboard;
 use crate::castling::CastlingRights;
 use crate::history::HistoryEntry;
-use crate::piece::{Color, Piece, PieceType};
+use crate::move_generator::{generate, GenType};
 use crate::piece::Color::{Black, White};
 use crate::piece::PieceType::Pawn;
-use crate::r#move::{ Move, MoveFlags };
-use crate::square::{parse_square, Square, square_representation};
-use crate::zob_hash::{ZobristHasher, Hash};
-use crate::move_generator::{ generate, GenType };
+use crate::piece::{Color, Piece, PieceType};
+use crate::r#move::{Move, MoveFlags};
+use crate::square::{parse_square, square_representation, Square};
+use crate::zob_hash::{Hash, ZobristHasher};
+use std::fmt::{Display, Formatter};
 
 // Bitboards are indexed by color and piece_type, with a redudant
 // color bitboard at index 7.
@@ -52,7 +52,10 @@ impl Board {
     /// Note that the move is expected to be legal, inputting a random
     /// 16bit integer will break the position
     pub fn make(&mut self, mv: Move) {
-        if mv == Move::NULL_MOVE { self.make_null(); return }
+        if mv == Move::NULL_MOVE {
+            self.make_null();
+            return;
+        }
 
         let origin = mv.origin();
         let target = mv.target();
@@ -64,7 +67,7 @@ impl Board {
             captured_piece: self.remove_piece(target),
             ep_target: self.ep_target,
             castling_rights: self.castling_rights,
-            reversible_moves: self.reversible_moves
+            reversible_moves: self.reversible_moves,
         };
 
         self.hash ^= ZobristHasher::castling_rights_hash(self.castling_rights);
@@ -92,29 +95,43 @@ impl Board {
             MoveFlags::Quiet if moved_piece.piece_type != Pawn => {
                 self.reversible_moves += 1;
                 self.repeatable.push(before_move_hash);
-            },
+            }
             MoveFlags::DoublePush => {
                 self.ep_target = Some((target + origin) / 2);
                 self.hash ^= ZobristHasher::en_passant_hash(self.ep_target);
-            },
-            MoveFlags::EnPassant => { 
-                self.remove_piece(if self.side_to_move == White { target-8 } else { target+8 });
-            },
+            }
+            MoveFlags::EnPassant => {
+                self.remove_piece(if self.side_to_move == White {
+                    target - 8
+                } else {
+                    target + 8
+                });
+            }
             MoveFlags::Promotion(p) | MoveFlags::PromotionCapture(p) => {
                 self.remove_piece(target);
-                self.add_piece(Piece { piece_type: p, color: self.side_to_move }, target);
-            },
+                self.add_piece(
+                    Piece {
+                        piece_type: p,
+                        color: self.side_to_move,
+                    },
+                    target,
+                );
+            }
             MoveFlags::KingSideCastle => {
-                let moved_rook = self.remove_piece(if self.side_to_move == White { 7 } else { 63 }).unwrap();
-                self.add_piece(moved_rook, if self.side_to_move == White { 5 } else { 61 } )
-            },
+                let moved_rook = self
+                    .remove_piece(if self.side_to_move == White { 7 } else { 63 })
+                    .unwrap();
+                self.add_piece(moved_rook, if self.side_to_move == White { 5 } else { 61 })
+            }
             MoveFlags::QueenSideCastle => {
-                let moved_rook = self.remove_piece(if self.side_to_move == White { 0 } else { 56 }).unwrap();
-                self.add_piece(moved_rook, if self.side_to_move == White { 3 } else { 59 } )
-            },
-            _ => ()
+                let moved_rook = self
+                    .remove_piece(if self.side_to_move == White { 0 } else { 56 })
+                    .unwrap();
+                self.add_piece(moved_rook, if self.side_to_move == White { 3 } else { 59 })
+            }
+            _ => (),
         }
-        
+
         self.hash ^= ZobristHasher::ZOBRIST_KEYS[ZobristHasher::BLACK_TO_MOVE_INDEX];
         self.side_to_move = self.side_to_move.opposite();
         self.ply += 1;
@@ -131,7 +148,7 @@ impl Board {
         let moves = generate(self, GenType::Legal);
         let (origin, target, maybe_prom) = match Move::parse(move_str) {
             Some(r) => r,
-            None => return Err(String::from("Failed to parse the move"))
+            None => return Err(String::from("Failed to parse the move")),
         };
 
         if let Some(m) = &moves.iter().find(|m| {
@@ -140,7 +157,9 @@ impl Board {
             self.make(**m);
             Ok(())
         } else {
-            Err(String::from("The move wasn't formatted correctly or was illegal"))
+            Err(String::from(
+                "The move wasn't formatted correctly or was illegal",
+            ))
         }
     }
 
@@ -164,11 +183,18 @@ impl Board {
 
     /// Unmakes the move on the top of the history stack
     pub fn unmake(&mut self) {
-        let unretrievable_info = if let Some(h) = self.history_entries.pop() { h } else { return };
+        let unretrievable_info = if let Some(h) = self.history_entries.pop() {
+            h
+        } else {
+            return;
+        };
         self.repeatable.pop();
 
         let move_played = unretrievable_info.move_played;
-        if move_played == Move::NULL_MOVE { self.unmake_null(unretrievable_info.ep_target); return }
+        if move_played == Move::NULL_MOVE {
+            self.unmake_null(unretrievable_info.ep_target);
+            return;
+        }
 
         let captured_piece = unretrievable_info.captured_piece;
         self.hash ^= ZobristHasher::en_passant_hash(self.ep_target);
@@ -190,25 +216,40 @@ impl Board {
         }
 
         match move_played.flags() {
-            MoveFlags::EnPassant => {
-                self.add_piece(
-                    Piece { piece_type: Pawn, color: self.side_to_move.opposite() },
-                    if self.side_to_move == White { move_played.target()-8 } else { move_played.target()+8 }
-                )
-            },
+            MoveFlags::EnPassant => self.add_piece(
+                Piece {
+                    piece_type: Pawn,
+                    color: self.side_to_move.opposite(),
+                },
+                if self.side_to_move == White {
+                    move_played.target() - 8
+                } else {
+                    move_played.target() + 8
+                },
+            ),
             MoveFlags::Promotion(_) | MoveFlags::PromotionCapture(_) => {
                 self.remove_piece(move_played.origin());
-                self.add_piece(Piece { piece_type: Pawn, color: self.side_to_move }, move_played.origin());
-            },
+                self.add_piece(
+                    Piece {
+                        piece_type: Pawn,
+                        color: self.side_to_move,
+                    },
+                    move_played.origin(),
+                );
+            }
             MoveFlags::KingSideCastle => {
-                let moved_rook = self.remove_piece(if self.side_to_move == White { 5 } else { 61 }).unwrap();
-                self.add_piece(moved_rook, if self.side_to_move == White { 7 } else { 63 } )
-            },
+                let moved_rook = self
+                    .remove_piece(if self.side_to_move == White { 5 } else { 61 })
+                    .unwrap();
+                self.add_piece(moved_rook, if self.side_to_move == White { 7 } else { 63 })
+            }
             MoveFlags::QueenSideCastle => {
-                let moved_rook = self.remove_piece(if self.side_to_move == White { 3 } else { 59 }).unwrap();
-                self.add_piece(moved_rook, if self.side_to_move == White { 0 } else { 56 } )
-            },
-            _ => ()
+                let moved_rook = self
+                    .remove_piece(if self.side_to_move == White { 3 } else { 59 })
+                    .unwrap();
+                self.add_piece(moved_rook, if self.side_to_move == White { 0 } else { 56 })
+            }
+            _ => (),
         }
     }
 
@@ -243,7 +284,9 @@ impl Board {
     /*
     INTERESTING GETTERS
      */
-    pub fn side_to_move(&self) -> Color { self.side_to_move }
+    pub fn side_to_move(&self) -> Color {
+        self.side_to_move
+    }
 
     pub fn en_passant_target(&self) -> Option<Square> {
         self.ep_target
@@ -293,15 +336,23 @@ impl Board {
     }
 
     pub fn last_was_capture(&self) -> bool {
-        self.history_entries[self.history_entries.len() - 1].move_played.is_capture()
+        self.history_entries[self.history_entries.len() - 1]
+            .move_played
+            .is_capture()
     }
 
     pub fn in_check(&self, side: Color) -> bool {
-        let king_square = if let Some(sq) = self.king_square(side) { sq } else { return true };
+        let king_square = if let Some(sq) = self.king_square(side) {
+            sq
+        } else {
+            return true;
+        };
         self.attackers_of_square(king_square, side.opposite(), Bitboard::EMPTY) != Bitboard::EMPTY
     }
 
-    pub fn fifty_move_draw(&self) -> bool { self.reversible_moves >= 50 }
+    pub fn fifty_move_draw(&self) -> bool {
+        self.reversible_moves >= 50
+    }
 
     pub fn repetitions(&self, hash: Hash) -> usize {
         self.repeatable.iter().filter(|h| hash == **h).count()
@@ -320,23 +371,43 @@ impl Board {
             self.get_occupancy_bitboard()
         };
 
-        attack_map |= Bitboard::pawn_attacks(self.bitboards[attacking_color as usize][0], attacking_color);
-        for sq in self.bitboards[attacking_color as usize][1] { attack_map |= Bitboard::KNIGHT_ATTACKS[sq] };
-        for sq in self.bitboards[attacking_color as usize][5] { attack_map |= Bitboard::KING_ATTACKS[sq] };
-        attack_map |= Bitboard::bishop_attacks_setwise(self.get_diagonal_sliders_bitboard(attacking_color), !occupancy);
-        attack_map |= Bitboard::rook_attacks_setwise(self.get_cardinal_sliders_bitboard(attacking_color), !occupancy);
+        attack_map |=
+            Bitboard::pawn_attacks(self.bitboards[attacking_color as usize][0], attacking_color);
+        for sq in self.bitboards[attacking_color as usize][1] {
+            attack_map |= Bitboard::KNIGHT_ATTACKS[sq]
+        }
+        for sq in self.bitboards[attacking_color as usize][5] {
+            attack_map |= Bitboard::KING_ATTACKS[sq]
+        }
+        attack_map |= Bitboard::bishop_attacks_setwise(
+            self.get_diagonal_sliders_bitboard(attacking_color),
+            !occupancy,
+        );
+        attack_map |= Bitboard::rook_attacks_setwise(
+            self.get_cardinal_sliders_bitboard(attacking_color),
+            !occupancy,
+        );
 
         attack_map
     }
 
     /// Returns a bitboard with attackers of a square
-    pub fn attackers_of_square(&self, target: Square, attacking_color: Color, ignore_bb: Bitboard) -> Bitboard {
+    pub fn attackers_of_square(
+        &self,
+        target: Square,
+        attacking_color: Color,
+        ignore_bb: Bitboard,
+    ) -> Bitboard {
         let mut attackers = Bitboard::EMPTY;
         let occupancy = self.get_occupancy_bitboard() & !ignore_bb;
-        attackers |= Bitboard::pawn_attacks(Bitboard::from_square(target), attacking_color.opposite()) & self.bitboards[attacking_color as usize][0];
+        attackers |=
+            Bitboard::pawn_attacks(Bitboard::from_square(target), attacking_color.opposite())
+                & self.bitboards[attacking_color as usize][0];
         attackers |= Bitboard::KNIGHT_ATTACKS[target] & self.bitboards[attacking_color as usize][1];
-        attackers |= Bitboard::bishop_attacks(target, occupancy) & self.get_diagonal_sliders_bitboard(attacking_color);
-        attackers |= Bitboard::rook_attacks(target, occupancy) & self.get_cardinal_sliders_bitboard(attacking_color);
+        attackers |= Bitboard::bishop_attacks(target, occupancy)
+            & self.get_diagonal_sliders_bitboard(attacking_color);
+        attackers |= Bitboard::rook_attacks(target, occupancy)
+            & self.get_cardinal_sliders_bitboard(attacking_color);
         attackers
     }
 
@@ -350,18 +421,24 @@ impl Board {
         let attacking_side = self.side_to_move.opposite();
 
         let bishop_sliders = self.get_diagonal_sliders_bitboard(attacking_side);
-        let bishop_pinners = Bitboard::xray_bishop_attacks(relative_to, occupancy, friendly) & bishop_sliders;
+        let bishop_pinners =
+            Bitboard::xray_bishop_attacks(relative_to, occupancy, friendly) & bishop_sliders;
         for potential_pinner in bishop_pinners {
             let pinned_piece = Bitboard::get_ray(relative_to, potential_pinner) & friendly;
             pinned_bb |= pinned_piece;
-            if pinned_piece != Bitboard::EMPTY { pinners_bb.set(potential_pinner) }
+            if pinned_piece != Bitboard::EMPTY {
+                pinners_bb.set(potential_pinner)
+            }
         }
         let rook_sliders = self.get_cardinal_sliders_bitboard(attacking_side);
-        let rook_pinners = Bitboard::xray_rook_attacks(relative_to, occupancy, friendly) & rook_sliders;
+        let rook_pinners =
+            Bitboard::xray_rook_attacks(relative_to, occupancy, friendly) & rook_sliders;
         for potential_pinner in rook_pinners {
             let pinned_piece = Bitboard::get_ray(relative_to, potential_pinner) & friendly;
             pinned_bb |= pinned_piece;
-            if pinned_piece != Bitboard::EMPTY { pinners_bb.set(potential_pinner) }
+            if pinned_piece != Bitboard::EMPTY {
+                pinners_bb.set(potential_pinner)
+            }
         }
         (pinned_bb, pinners_bb)
     }
@@ -376,10 +453,10 @@ impl Board {
      */
     fn set_fen(&mut self, fen: &str) {
         let mut sections = fen.split(' ');
-        let get = |x: Option<&str>| { match x {
+        let get = |x: Option<&str>| match x {
             Some(s) => s.to_owned(),
-            _ => "".to_owned()
-        }};
+            _ => "".to_owned(),
+        };
         let piece_placement = get(sections.next());
         let side = get(sections.next());
         let castling = get(sections.next());
@@ -395,9 +472,11 @@ impl Board {
 
         let mut current_square: usize = 56;
         for c in piece_placement.chars() {
-            if c == '/' { current_square -= 16 }
-            else if c.is_digit(10) { current_square += c.to_digit(10).unwrap() as usize }
-            else {
+            if c == '/' {
+                current_square -= 16
+            } else if c.is_digit(10) {
+                current_square += c.to_digit(10).unwrap() as usize
+            } else {
                 self.add_piece(Piece::from_char(c).unwrap(), current_square);
                 current_square += 1;
             }
@@ -413,19 +492,25 @@ impl Board {
         let mut current_square = 56;
         let mut empty_counter = 0;
         loop {
-           match self.pieces[current_square] {
-               Some(p) => {
-                   if empty_counter != 0 { fen.push_str(&empty_counter.to_string()) }
-                   empty_counter = 0;
-                   fen.push_str(&p.to_string())
-               }
-               None => empty_counter += 1
-           }
+            match self.pieces[current_square] {
+                Some(p) => {
+                    if empty_counter != 0 {
+                        fen.push_str(&empty_counter.to_string())
+                    }
+                    empty_counter = 0;
+                    fen.push_str(&p.to_string())
+                }
+                None => empty_counter += 1,
+            }
 
             current_square += 1;
-            if current_square == 8 { break; }
+            if current_square == 8 {
+                break;
+            }
             if current_square % 8 == 0 {
-                if empty_counter != 0 { fen.push_str(&empty_counter.to_string()) }
+                if empty_counter != 0 {
+                    fen.push_str(&empty_counter.to_string())
+                }
                 empty_counter = 0;
                 fen.push('/');
                 current_square -= 16;
@@ -436,7 +521,7 @@ impl Board {
         fen.push_str(&self.castling_rights.to_string());
         match self.ep_target {
             Some(sq) => fen.push_str(&(" ".to_owned() + &square_representation(sq).unwrap() + " ")),
-            None => fen.push_str(" - ")
+            None => fen.push_str(" - "),
         }
         fen.push_str(&(self.reversible_moves.to_string() + " "));
         fen.push_str(&self.ply.to_string());
@@ -446,7 +531,9 @@ impl Board {
     /*
     HASHING
      */
-    pub fn get_hash(&self) -> Hash { self.hash }
+    pub fn get_hash(&self) -> Hash {
+        self.hash
+    }
 
     fn cold_hash(&self) -> Hash {
         let mut hash = 0u64;
@@ -454,7 +541,7 @@ impl Board {
             if let Some(piece) = maybe_piece {
                 hash ^= ZobristHasher::hash_for_piece_sq(*piece, sq)
             }
-        } 
+        }
         hash ^= ZobristHasher::side_to_move_hash(self.side_to_move);
         hash ^= ZobristHasher::castling_rights_hash(self.castling_rights);
         hash ^= ZobristHasher::en_passant_hash(self.ep_target);
@@ -464,16 +551,16 @@ impl Board {
 
 impl Display for Board {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let mut ranks: Vec<String> = vec!();
+        let mut ranks: Vec<String> = vec![];
         let mut line: String = String::new();
         for sq in 0..64 {
-            if sq%8 == 0 && sq != 0 {
+            if sq % 8 == 0 && sq != 0 {
                 ranks.push(line);
                 line = String::new()
             }
             match self.pieces[sq] {
                 None => line.push_str(". "),
-                Some(p) => line.push_str(&(p.to_string() + " "))
+                Some(p) => line.push_str(&(p.to_string() + " ")),
             }
         }
         ranks.push(line);
@@ -481,14 +568,35 @@ impl Display for Board {
 
         let mut ranks_iter = ranks.iter();
         writeln!(f, "{}", ranks_iter.next().unwrap())?;
-        writeln!(f, "{}  side to move: {}", ranks_iter.next().unwrap(), self.side_to_move)?;
-        writeln!(f, "{}  castling_rights: {}", ranks_iter.next().unwrap(), self.castling_rights)?;
-        writeln!(f, "{}  en passant: {}", ranks_iter.next().unwrap(), if let Some(sq) = self.ep_target {
-            square_representation(sq).unwrap()
-        } else {
-            String::from("-")
-        })?;
-        writeln!(f, "{}  ply: {} ({} reversible moves)", ranks_iter.next().unwrap(), self.ply, self.reversible_moves)?;
+        writeln!(
+            f,
+            "{}  side to move: {}",
+            ranks_iter.next().unwrap(),
+            self.side_to_move
+        )?;
+        writeln!(
+            f,
+            "{}  castling_rights: {}",
+            ranks_iter.next().unwrap(),
+            self.castling_rights
+        )?;
+        writeln!(
+            f,
+            "{}  en passant: {}",
+            ranks_iter.next().unwrap(),
+            if let Some(sq) = self.ep_target {
+                square_representation(sq).unwrap()
+            } else {
+                String::from("-")
+            }
+        )?;
+        writeln!(
+            f,
+            "{}  ply: {} ({} reversible moves)",
+            ranks_iter.next().unwrap(),
+            self.ply,
+            self.reversible_moves
+        )?;
         writeln!(f, "{}  hash: {:#0x}", ranks_iter.next().unwrap(), self.hash).unwrap();
         writeln!(f, "{}  fen: {}", ranks_iter.next().unwrap(), self.get_fen())?;
         write!(f, "{}", ranks_iter.next().unwrap())

@@ -1,10 +1,12 @@
+use crate::{evaluation::Score, r#move::Move, zob_hash::Hash};
 use arrayvec::ArrayVec;
 use spin::mutex::SpinMutex;
-use crate::{zob_hash::Hash, evaluation::Score, r#move::Move};
 
 #[derive(PartialEq, Debug, Clone, Copy)]
 pub enum NodeType {
-    Exact, Alpha, Beta
+    Exact,
+    Alpha,
+    Beta,
 }
 #[derive(Clone, Copy)]
 pub struct SearchInfo {
@@ -18,9 +20,12 @@ pub struct SearchInfo {
 impl std::fmt::Display for SearchInfo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         write!(
-            f, 
+            f,
             "hash {:#0x}:\nbest {}, depth {}, score {} ({:#?} node)",
-            self.position_hash, self.best_move.unwrap_or(Move::NULL_MOVE), self.depth_searched, self.score,
+            self.position_hash,
+            self.best_move.unwrap_or(Move::NULL_MOVE),
+            self.depth_searched,
+            self.score,
             self.node_type
         )
     }
@@ -30,7 +35,7 @@ pub const HASHTABLE_SIZE: usize = 2_usize.pow(16);
 
 // A shareable, thread safe, but lockless hashtable.
 // Instead, the locks are held by the entries
-pub struct HashTable<T: Copy + Sync> (ArrayVec<SpinMutex<Option<T>>, HASHTABLE_SIZE>);
+pub struct HashTable<T: Copy + Sync>(ArrayVec<SpinMutex<Option<T>>, HASHTABLE_SIZE>);
 impl<T: Copy + Sync> HashTable<T> {
     // Creating a hashtable already fills every single entry
     pub fn new() -> Self {
@@ -38,7 +43,7 @@ impl<T: Copy + Sync> HashTable<T> {
         for _ in 0..HASHTABLE_SIZE {
             table.push(SpinMutex::new(None))
         }
-        HashTable (table)
+        HashTable(table)
     }
 
     /// Returns the lock to a given entry
@@ -52,10 +57,10 @@ impl<T: Copy + Sync> HashTable<T> {
     }
 }
 
-pub struct TranspositionTable (HashTable<(SearchInfo, Option<SearchInfo>)>);
+pub struct TranspositionTable(HashTable<(SearchInfo, Option<SearchInfo>)>);
 impl TranspositionTable {
     pub fn new() -> Self {
-        TranspositionTable (HashTable::new())
+        TranspositionTable(HashTable::new())
     }
 
     pub fn get(&self, hash: Hash) -> Option<SearchInfo> {
@@ -64,10 +69,10 @@ impl TranspositionTable {
         let (depth_entry, young_entry) = entry?;
 
         if depth_entry.position_hash == hash {
-            return Some(depth_entry)
+            return Some(depth_entry);
         } else if let Some(e) = young_entry {
             if e.position_hash == hash {
-                return young_entry
+                return young_entry;
             }
         }
         None
@@ -92,5 +97,10 @@ impl TranspositionTable {
 
     fn should_replace(old_info: &SearchInfo, new_info: &SearchInfo) -> bool {
         old_info.age != new_info.age || old_info.depth_searched <= new_info.depth_searched
+    }
+}
+impl Default for TranspositionTable {
+    fn default() -> Self {
+        Self::new()
     }
 }

@@ -1,8 +1,8 @@
+use rand_mt::Mt64;
 use std::env;
 use std::fs::File;
-use std::path::Path;
 use std::io::Write;
-use rand_mt::Mt64;
+use std::path::Path;
 
 fn main() {
     let out_dir = env::var_os("OUT_DIR").unwrap();
@@ -20,76 +20,75 @@ fn main() {
     inject_array(
         &mut file,
         "pub const KNIGHT_ATTACKS: [Bitboard; 64]",
-        &processed_consts.knight_attacks, 
-        Some("Bitboard")
+        &processed_consts.knight_attacks,
+        Some("Bitboard"),
     );
     inject_array(
         &mut file,
         "pub const KING_ATTACKS: [Bitboard; 64]",
-        &processed_consts.king_attacks, 
-        Some("Bitboard")
+        &processed_consts.king_attacks,
+        Some("Bitboard"),
     );
     inject_array(
         &mut file,
         "pub const BISHOP_MAGICS: [u64; 64]",
-        &processed_consts.bishop_magics, 
-        None
+        &processed_consts.bishop_magics,
+        None,
     );
     inject_array(
         &mut file,
         "pub const BISHOP_MAGIC_SHIFTS: [usize; 64]",
-        &processed_consts.bishop_magic_bits, 
-        None
+        &processed_consts.bishop_magic_bits,
+        None,
     );
     inject_array(
         &mut file,
         "pub const BISHOP_MASKS: [Bitboard; 64]",
         &processed_consts.bishop_masks,
-        Some("Bitboard")
+        Some("Bitboard"),
     );
     inject_array(
         &mut file,
         "pub const ROOK_MAGICS: [u64; 64]",
-        &processed_consts.rook_magics, 
-        None
+        &processed_consts.rook_magics,
+        None,
     );
     inject_array(
         &mut file,
         "pub const ROOK_MAGIC_SHIFTS: [usize; 64]",
-        &processed_consts.rook_magic_bits, 
-        None
+        &processed_consts.rook_magic_bits,
+        None,
     );
     inject_array(
         &mut file,
         "pub const ROOK_MASKS: [Bitboard; 64]",
         &processed_consts.rook_masks,
-        Some("Bitboard")
+        Some("Bitboard"),
     );
-
 
     inject_2d_array(
         &mut file,
         "pub const RAYS: [[Bitboard; 64]; 8]",
         Vec::from(processed_consts.rays.map(Vec::from)),
-        Some("Bitboard")
+        Some("Bitboard"),
     );
     inject_2d_array(
         &mut file,
         "pub const ORIGIN_TARGET_RAYS: [[Bitboard; 64]; 64]",
         Vec::from(processed_consts.origin_target_rays.map(Vec::from)),
-        Some("Bitboard")
+        Some("Bitboard"),
     );
     inject_2d_array(
         &mut file,
         "pub const BISHOP_ATTACKS_TABLE: [[Bitboard; 1024]; 64]",
         processed_consts.bishop_attacks,
-        Some("Bitboard")
+        Some("Bitboard"),
     );
     inject_2d_array(
         &mut file,
         "pub const ROOK_ATTACKS_TABLE: [[Bitboard; 4096]; 64]",
         processed_consts.rook_attacks,
-        Some("Bitboard")
+        Some("Bitboard"),
     );
     writeln!(&mut file, "}}").unwrap();
 
@@ -224,7 +223,8 @@ fn main() {
             ],
         ];
         "
-    ).unwrap();
+    )
+    .unwrap();
 
     file = File::create(zobrist_file).unwrap();
     writeln!(&mut file, "impl ZobristHasher {{").unwrap();
@@ -232,37 +232,57 @@ fn main() {
         &mut file,
         "pub const ZOBRIST_KEYS: [u64; 781]",
         &BuildPreprocessor::initialize_zobrist_keys(),
-        None
+        None,
     );
     writeln!(&mut file, "}}").unwrap();
 
     println!("cargo:rerun-if-changed=build.rs");
 }
 
-fn inject_array<T: ToString>(file: &mut File, declaration: &str, array: &[T], constructor: Option<&str>) {
+fn inject_array<T: ToString>(
+    file: &mut File,
+    declaration: &str,
+    array: &[T],
+    constructor: Option<&str>,
+) {
     println!("in function array_to_code with decl {}", declaration);
 
     writeln!(file, "{} = [", declaration).unwrap();
     for value in array {
-        write!(file, "{}, ", match constructor {
-            Some(c) => c.to_owned() + "(" + &value.to_string() + ")",
-            None => value.to_string()
-        }).unwrap();
+        write!(
+            file,
+            "{}, ",
+            match constructor {
+                Some(c) => c.to_owned() + "(" + &value.to_string() + ")",
+                None => value.to_string(),
+            }
+        )
+        .unwrap();
     }
     writeln!(file, "];").unwrap();
 }
 
-fn inject_2d_array<T: ToString>(file: &mut File, declaration: &str, array: Vec<Vec<T>>, constructor: Option<&str>) {
+fn inject_2d_array<T: ToString>(
+    file: &mut File,
+    declaration: &str,
+    array: Vec<Vec<T>>,
+    constructor: Option<&str>,
+) {
     println!("in function array_to_code with decl {}", declaration);
 
     writeln!(file, "{} = [", declaration).unwrap();
     for slice in array {
         write!(file, "[").unwrap();
         for value in slice {
-            write!(file, "{}, ", match constructor {
-                Some(c) => c.to_owned() + "(" + &value.to_string() + ")",
-                None => value.to_string()
-            }).unwrap();
+            write!(
+                file,
+                "{}, ",
+                match constructor {
+                    Some(c) => c.to_owned() + "(" + &value.to_string() + ")",
+                    None => value.to_string(),
+                }
+            )
+            .unwrap();
         }
         writeln!(file, "], ").unwrap();
     }
@@ -283,7 +303,7 @@ struct BuildPreprocessor {
     pub rook_magics: [u64; 64],
     pub rook_magic_bits: [usize; 64],
     pub rook_masks: [u64; 64],
-    pub rook_attacks: Vec<Vec<u64>>
+    pub rook_attacks: Vec<Vec<u64>>,
 }
 
 impl BuildPreprocessor {
@@ -303,11 +323,21 @@ impl BuildPreprocessor {
             bishop_magics,
             bishop_magic_bits,
             bishop_masks,
-            bishop_attacks: Self::process_bishop_attacks(bishop_magics, bishop_magic_bits, rays, bishop_masks),
+            bishop_attacks: Self::process_bishop_attacks(
+                bishop_magics,
+                bishop_magic_bits,
+                rays,
+                bishop_masks,
+            ),
             rook_magics,
             rook_magic_bits,
             rook_masks,
-            rook_attacks: Self::process_rook_attacks(rook_magics, rook_magic_bits, rays, rook_masks),
+            rook_attacks: Self::process_rook_attacks(
+                rook_magics,
+                rook_magic_bits,
+                rays,
+                rook_masks,
+            ),
         }
     }
 
@@ -323,7 +353,7 @@ impl BuildPreprocessor {
             |bb| (bb << 6) & !0xc0c0c0c0c0c0c0c0,
             |bb| (bb >> 6) & !0x303030303030303,
         ];
-        let mut results = vec!();
+        let mut results = vec![];
         for sq in 0..64 {
             let origin = 1u64 << sq;
             let mut attacks = 0u64;
@@ -347,7 +377,7 @@ impl BuildPreprocessor {
             |bb| bb << 8,
             |bb| bb >> 8,
         ];
-        let mut results = vec!();
+        let mut results = vec![];
         for sq in 0..64 {
             let origin = 1u64 << sq;
             let mut attacks = 0u64;
@@ -359,75 +389,173 @@ impl BuildPreprocessor {
         results
     }
 
-
     // TODO: Change this to calculate magics at compile time
-    // Right now this uses magics from Shallow Blue by GunshipPenguin 
+    // Right now this uses magics from Shallow Blue by GunshipPenguin
     // (https://github.com/GunshipPenguin/shallow-blue/blob/c6d7e9615514a86533a9e0ffddfc96e058fc9cfd/src/attacks.h#L120)
     fn process_rook_magics() -> ([u64; 64], [usize; 64]) {
-        ([
-            0xa8002c000108020, 0x6c00049b0002001, 0x100200010090040, 0x2480041000800801, 0x280028004000800,
-            0x900410008040022, 0x280020001001080, 0x2880002041000080, 0xa000800080400034, 0x4808020004000,
-            0x2290802004801000, 0x411000d00100020, 0x402800800040080, 0xb000401004208, 0x2409000100040200,
-            0x1002100004082, 0x22878001e24000, 0x1090810021004010, 0x801030040200012, 0x500808008001000,
-            0xa08018014000880, 0x8000808004000200, 0x201008080010200, 0x801020000441091, 0x800080204005,
-            0x1040200040100048, 0x120200402082, 0xd14880480100080, 0x12040280080080, 0x100040080020080,
-            0x9020010080800200, 0x813241200148449, 0x491604001800080, 0x100401000402001, 0x4820010021001040,
-            0x400402202000812, 0x209009005000802, 0x810800601800400, 0x4301083214000150, 0x204026458e001401,
-            0x40204000808000, 0x8001008040010020, 0x8410820820420010, 0x1003001000090020, 0x804040008008080,
-            0x12000810020004, 0x1000100200040208, 0x430000a044020001, 0x280009023410300, 0xe0100040002240,
-            0x200100401700, 0x2244100408008080, 0x8000400801980, 0x2000810040200, 0x8010100228810400,
-            0x2000009044210200, 0x4080008040102101, 0x40002080411d01, 0x2005524060000901, 0x502001008400422,
-            0x489a000810200402, 0x1004400080a13, 0x4000011008020084, 0x26002114058042
-        ],[
-            12, 11, 11, 11, 11, 11, 11, 12,
-            11, 10, 10, 10, 10, 10, 10, 11,
-            11, 10, 10, 10, 10, 10, 10, 11,
-            11, 10, 10, 10, 10, 10, 10, 11,
-            11, 10, 10, 10, 10, 10, 10, 11,
-            11, 10, 10, 10, 10, 10, 10, 11,
-            11, 10, 10, 10, 10, 10, 10, 11,
-            12, 11, 11, 11, 11, 11, 11, 12
-        ])
+        (
+            [
+                0xa8002c000108020,
+                0x6c00049b0002001,
+                0x100200010090040,
+                0x2480041000800801,
+                0x280028004000800,
+                0x900410008040022,
+                0x280020001001080,
+                0x2880002041000080,
+                0xa000800080400034,
+                0x4808020004000,
+                0x2290802004801000,
+                0x411000d00100020,
+                0x402800800040080,
+                0xb000401004208,
+                0x2409000100040200,
+                0x1002100004082,
+                0x22878001e24000,
+                0x1090810021004010,
+                0x801030040200012,
+                0x500808008001000,
+                0xa08018014000880,
+                0x8000808004000200,
+                0x201008080010200,
+                0x801020000441091,
+                0x800080204005,
+                0x1040200040100048,
+                0x120200402082,
+                0xd14880480100080,
+                0x12040280080080,
+                0x100040080020080,
+                0x9020010080800200,
+                0x813241200148449,
+                0x491604001800080,
+                0x100401000402001,
+                0x4820010021001040,
+                0x400402202000812,
+                0x209009005000802,
+                0x810800601800400,
+                0x4301083214000150,
+                0x204026458e001401,
+                0x40204000808000,
+                0x8001008040010020,
+                0x8410820820420010,
+                0x1003001000090020,
+                0x804040008008080,
+                0x12000810020004,
+                0x1000100200040208,
+                0x430000a044020001,
+                0x280009023410300,
+                0xe0100040002240,
+                0x200100401700,
+                0x2244100408008080,
+                0x8000400801980,
+                0x2000810040200,
+                0x8010100228810400,
+                0x2000009044210200,
+                0x4080008040102101,
+                0x40002080411d01,
+                0x2005524060000901,
+                0x502001008400422,
+                0x489a000810200402,
+                0x1004400080a13,
+                0x4000011008020084,
+                0x26002114058042,
+            ],
+            [
+                12, 11, 11, 11, 11, 11, 11, 12, 11, 10, 10, 10, 10, 10, 10, 11, 11, 10, 10, 10, 10,
+                10, 10, 11, 11, 10, 10, 10, 10, 10, 10, 11, 11, 10, 10, 10, 10, 10, 10, 11, 11, 10,
+                10, 10, 10, 10, 10, 11, 11, 10, 10, 10, 10, 10, 10, 11, 12, 11, 11, 11, 11, 11, 11,
+                12,
+            ],
+        )
     }
 
     fn process_bishop_magics() -> ([u64; 64], [usize; 64]) {
-        ([
-            0x89a1121896040240, 0x2004844802002010, 0x2068080051921000, 0x62880a0220200808, 0x4042004000000,
-            0x100822020200011, 0xc00444222012000a, 0x28808801216001, 0x400492088408100, 0x201c401040c0084,
-            0x840800910a0010, 0x82080240060, 0x2000840504006000, 0x30010c4108405004, 0x1008005410080802,
-            0x8144042209100900, 0x208081020014400, 0x4800201208ca00, 0xf18140408012008, 0x1004002802102001,
-            0x841000820080811, 0x40200200a42008, 0x800054042000, 0x88010400410c9000, 0x520040470104290,
-            0x1004040051500081, 0x2002081833080021, 0x400c00c010142, 0x941408200c002000, 0x658810000806011,
-            0x188071040440a00, 0x4800404002011c00, 0x104442040404200, 0x511080202091021, 0x4022401120400,
-            0x80c0040400080120, 0x8040010040820802, 0x480810700020090, 0x102008e00040242, 0x809005202050100,
-            0x8002024220104080, 0x431008804142000, 0x19001802081400, 0x200014208040080, 0x3308082008200100,
-            0x41010500040c020, 0x4012020c04210308, 0x208220a202004080, 0x111040120082000, 0x6803040141280a00,
-            0x2101004202410000, 0x8200000041108022, 0x21082088000, 0x2410204010040, 0x40100400809000,
-            0x822088220820214, 0x40808090012004, 0x910224040218c9, 0x402814422015008, 0x90014004842410,
-            0x1000042304105, 0x10008830412a00, 0x2520081090008908, 0x40102000a0a60140,
-        ],[
-            6, 5, 5, 5, 5, 5, 5, 6,
-            5, 5, 5, 5, 5, 5, 5, 5,
-            5, 5, 7, 7, 7, 7, 5, 5,
-            5, 5, 7, 9, 9, 7, 5, 5,
-            5, 5, 7, 9, 9, 7, 5, 5,
-            5, 5, 7, 7, 7, 7, 5, 5,
-            5, 5, 5, 5, 5, 5, 5, 5,
-            6, 5, 5, 5, 5, 5, 5, 6
-        ])
+        (
+            [
+                0x89a1121896040240,
+                0x2004844802002010,
+                0x2068080051921000,
+                0x62880a0220200808,
+                0x4042004000000,
+                0x100822020200011,
+                0xc00444222012000a,
+                0x28808801216001,
+                0x400492088408100,
+                0x201c401040c0084,
+                0x840800910a0010,
+                0x82080240060,
+                0x2000840504006000,
+                0x30010c4108405004,
+                0x1008005410080802,
+                0x8144042209100900,
+                0x208081020014400,
+                0x4800201208ca00,
+                0xf18140408012008,
+                0x1004002802102001,
+                0x841000820080811,
+                0x40200200a42008,
+                0x800054042000,
+                0x88010400410c9000,
+                0x520040470104290,
+                0x1004040051500081,
+                0x2002081833080021,
+                0x400c00c010142,
+                0x941408200c002000,
+                0x658810000806011,
+                0x188071040440a00,
+                0x4800404002011c00,
+                0x104442040404200,
+                0x511080202091021,
+                0x4022401120400,
+                0x80c0040400080120,
+                0x8040010040820802,
+                0x480810700020090,
+                0x102008e00040242,
+                0x809005202050100,
+                0x8002024220104080,
+                0x431008804142000,
+                0x19001802081400,
+                0x200014208040080,
+                0x3308082008200100,
+                0x41010500040c020,
+                0x4012020c04210308,
+                0x208220a202004080,
+                0x111040120082000,
+                0x6803040141280a00,
+                0x2101004202410000,
+                0x8200000041108022,
+                0x21082088000,
+                0x2410204010040,
+                0x40100400809000,
+                0x822088220820214,
+                0x40808090012004,
+                0x910224040218c9,
+                0x402814422015008,
+                0x90014004842410,
+                0x1000042304105,
+                0x10008830412a00,
+                0x2520081090008908,
+                0x40102000a0a60140,
+            ],
+            [
+                6, 5, 5, 5, 5, 5, 5, 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 7, 7, 7, 7, 5, 5, 5, 5, 7, 9,
+                9, 7, 5, 5, 5, 5, 7, 9, 9, 7, 5, 5, 5, 5, 7, 7, 7, 7, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
+                6, 5, 5, 5, 5, 5, 5, 6,
+            ],
+        )
     }
 
     fn process_rays() -> [[u64; 64]; 8] {
         println!("processing rays");
         let shifts: [fn(u64) -> u64; 8] = [
-            |b| (b << 1) & !0x101010101010101, 
-            |b| (b >> 1) & !0x8080808080808080, 
+            |b| (b << 1) & !0x101010101010101,
+            |b| (b >> 1) & !0x8080808080808080,
             |b| b << 8,
-            |b| b >> 8, 
-            |b| (b << 7) & !0x8080808080808080, 
+            |b| b >> 8,
+            |b| (b << 7) & !0x8080808080808080,
             |b| (b >> 7) & !0x101010101010101,
-            |b| (b << 9) & !0x101010101010101, 
-            |b| (b >> 9) & !0x8080808080808080
+            |b| (b << 9) & !0x101010101010101,
+            |b| (b >> 9) & !0x8080808080808080,
         ];
 
         let mut results = [[0u64; 64]; 8];
@@ -454,7 +582,7 @@ impl BuildPreprocessor {
                 for ray in &rays {
                     if ray[origin] & (1 << target) != 0u64 {
                         origin_target_ray[target] = ray[origin] & !ray[target];
-                        break
+                        break;
                     }
                 }
             }
@@ -468,7 +596,9 @@ impl BuildPreprocessor {
         let mut mask = attack_mask;
         for i in 0..attack_mask.count_ones() {
             let lsb = mask.trailing_zeros();
-            if index & (1 << i) != 0 { blockers |= 1 << lsb }
+            if index & (1 << i) != 0 {
+                blockers |= 1 << lsb
+            }
             mask &= mask - 1
         }
         blockers
@@ -483,7 +613,7 @@ impl BuildPreprocessor {
             0x101010101010101 | 0xff00000000000000,
             0x8080808080808080 | 0xff,
             0x8080808080808080 | 0xff00000000000000,
-            0x101010101010101 | 0xff
+            0x101010101010101 | 0xff,
         ];
         let mut result = [0u64; 64];
         for (sq, mask) in result.iter_mut().enumerate() {
@@ -494,9 +624,14 @@ impl BuildPreprocessor {
         result
     }
 
-    fn process_bishop_attacks(magics: [u64; 64], shifts: [usize; 64], rays: [[u64; 64]; 8], masks: [u64; 64]) -> Vec<Vec<u64>> {
+    fn process_bishop_attacks(
+        magics: [u64; 64],
+        shifts: [usize; 64],
+        rays: [[u64; 64]; 8],
+        masks: [u64; 64],
+    ) -> Vec<Vec<u64>> {
         println!("processing bishop");
-        let mut bishop_attacks = vec!();
+        let mut bishop_attacks = vec![];
         for sq in 0..64 {
             let mut square_attacks = Vec::from([0u64; 1024]);
             for index in 0..(1 << shifts[sq]) {
@@ -515,14 +650,13 @@ impl BuildPreprocessor {
             let ray = rays_from[origin];
             let blocked_by = blockers & ray;
             if blocked_by != 0u64 {
-                let first_blocker_index = if ray_index % 2 == 0 { 
-                    blocked_by.trailing_zeros() 
-                } else { 
-                    63 - blocked_by.leading_zeros() 
+                let first_blocker_index = if ray_index % 2 == 0 {
+                    blocked_by.trailing_zeros()
+                } else {
+                    63 - blocked_by.leading_zeros()
                 };
                 attacks |= ray & !rays_from[first_blocker_index as usize];
-            }
-            else {
+            } else {
                 attacks |= ray
             }
         }
@@ -538,7 +672,7 @@ impl BuildPreprocessor {
             0x101010101010101 | 0xff00000000000000,
             0x8080808080808080 | 0xff,
             0x8080808080808080 | 0xff00000000000000,
-            0x101010101010101 | 0xff
+            0x101010101010101 | 0xff,
         ];
         let mut result = [0u64; 64];
         for (sq, mask) in result.iter_mut().enumerate() {
@@ -549,9 +683,14 @@ impl BuildPreprocessor {
         result
     }
 
-    fn process_rook_attacks(magics: [u64; 64], shifts: [usize; 64], rays: [[u64; 64]; 8], masks: [u64; 64]) -> Vec<Vec<u64>> {
+    fn process_rook_attacks(
+        magics: [u64; 64],
+        shifts: [usize; 64],
+        rays: [[u64; 64]; 8],
+        masks: [u64; 64],
+    ) -> Vec<Vec<u64>> {
         println!("processing rook");
-        let mut rook_attacks = vec!();
+        let mut rook_attacks = vec![];
         for sq in 0..64 {
             let mut square_attacks = Vec::from([0u64; 4096]);
             for index in 0..(1 << shifts[sq]) {
@@ -570,14 +709,13 @@ impl BuildPreprocessor {
             let ray = rays_from[origin];
             let blocked_by = blockers & ray;
             if blocked_by != 0u64 {
-                let first_blocker_index = if ray_index % 2 == 0 { 
-                    blocked_by.trailing_zeros() 
-                } else { 
-                    63 - blocked_by.leading_zeros() 
+                let first_blocker_index = if ray_index % 2 == 0 {
+                    blocked_by.trailing_zeros()
+                } else {
+                    63 - blocked_by.leading_zeros()
                 };
                 attacks |= ray & !rays_from[first_blocker_index as usize];
-            }
-            else {
+            } else {
                 attacks |= ray
             }
         }

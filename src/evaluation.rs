@@ -1,11 +1,11 @@
-use crate::piece::PieceType;
-use crate::piece::Color;
-use crate::board::Board;
-use crate::square::Square;
 use crate::bitboard::Bitboard;
+use crate::board::Board;
+use crate::piece::Color;
+use crate::piece::PieceType;
+use crate::square::Square;
 
-use std::cmp::max;
 use crate::r#move::Move;
+use std::cmp::max;
 
 // Build script to calculate evaluation constants at compile time
 include!(concat!(env!("OUT_DIR"), "/evaluation_constants.rs"));
@@ -14,7 +14,7 @@ pub type Score = i32;
 pub enum GamePhase {
     Opening,
     MiddleGame,
-    EndGame
+    EndGame,
 }
 
 pub struct Evaluation {
@@ -38,8 +38,8 @@ impl Evaluation {
                 score: Self::DRAW_SCORE,
                 game_phase: GamePhase::EndGame,
                 is_drawn: true,
-                full_eval: true
-            }
+                full_eval: true,
+            };
         }
 
         let mut phase = Self::MAX_PHASE;
@@ -48,10 +48,16 @@ impl Evaluation {
 
         for color in [Color::Black, Color::White] {
             for (piece, bb) in board.material_iter(color).enumerate() {
-                for sq in if color == Color::White { *bb } else { bb.vertical_flip() } {
+                for sq in if color == Color::White {
+                    *bb
+                } else {
+                    bb.vertical_flip()
+                } {
                     phase -= Self::PHASE_VALUE[piece];
-                    mg_scores[color as usize] += Self::MIDGAME_PIECE_TYPE_VALUE[piece] + MIDGAME_PIECE_SQUARE_TABLE[piece][sq];
-                    eg_scores[color as usize] += Self::ENDGAME_PIECE_TYPE_VALUE[piece] + ENDGAME_PIECE_SQUARE_TABLE[piece][sq];
+                    mg_scores[color as usize] += Self::MIDGAME_PIECE_TYPE_VALUE[piece]
+                        + MIDGAME_PIECE_SQUARE_TABLE[piece][sq];
+                    eg_scores[color as usize] += Self::ENDGAME_PIECE_TYPE_VALUE[piece]
+                        + ENDGAME_PIECE_SQUARE_TABLE[piece][sq];
                 }
             }
         }
@@ -64,22 +70,25 @@ impl Evaluation {
             GamePhase::EndGame
         };
         phase = (phase * 256 + (Self::MAX_PHASE / 2)) / Self::MAX_PHASE;
-        let mg_score = mg_scores[board.side_to_move() as usize] - mg_scores[board.side_to_move().opposite() as usize];
-        let eg_score = eg_scores[board.side_to_move() as usize] - eg_scores[board.side_to_move().opposite() as usize];
+        let mg_score = mg_scores[board.side_to_move() as usize]
+            - mg_scores[board.side_to_move().opposite() as usize];
+        let eg_score = eg_scores[board.side_to_move() as usize]
+            - eg_scores[board.side_to_move().opposite() as usize];
 
         Evaluation {
             score: ((mg_score * (256 - phase)) + (eg_score * phase)) / 256,
             game_phase,
             is_drawn: false,
-            full_eval: false
+            full_eval: false,
         }
-
     }
 
     pub fn deep_eval(&mut self, board: &Board) {
         // The position is already fully evaluated (likely in case of a drawn position),
         // we have nothing more to do
-        if self.full_eval { return; }
+        if self.full_eval {
+            return;
+        }
 
         let mut scores: [Score; 2] = [0; 2];
 
@@ -87,20 +96,35 @@ impl Evaluation {
         // TODO
 
         // Center control evaluation
-        let (w_attack_map, b_attack_map) = (board.attack_map(Color::White, false), board.attack_map(Color::Black, false));
-        let (w_safe_squares, b_safe_squares) = (w_attack_map & !b_attack_map, b_attack_map & !w_attack_map);
-        let (w_center_control, b_center_control) = (w_safe_squares & Bitboard::CENTER, b_safe_squares & Bitboard::CENTER);
-        let (w_large_center_control, b_large_center_control) = (w_safe_squares & Bitboard::LARGE_CENTER, b_safe_squares & Bitboard::LARGE_CENTER);
-        scores[Color::White as usize] += w_center_control.pop_count() as i32 * 5 + w_large_center_control.pop_count() as i32 * 2;
-        scores[Color::Black as usize] += b_center_control.pop_count() as i32 * 5 + b_large_center_control.pop_count() as i32 * 2;
+        let (w_attack_map, b_attack_map) = (
+            board.attack_map(Color::White, false),
+            board.attack_map(Color::Black, false),
+        );
+        let (w_safe_squares, b_safe_squares) =
+            (w_attack_map & !b_attack_map, b_attack_map & !w_attack_map);
+        let (w_center_control, b_center_control) = (
+            w_safe_squares & Bitboard::CENTER,
+            b_safe_squares & Bitboard::CENTER,
+        );
+        let (w_large_center_control, b_large_center_control) = (
+            w_safe_squares & Bitboard::LARGE_CENTER,
+            b_safe_squares & Bitboard::LARGE_CENTER,
+        );
+        scores[Color::White as usize] +=
+            w_center_control.pop_count() as i32 * 5 + w_large_center_control.pop_count() as i32 * 2;
+        scores[Color::Black as usize] +=
+            b_center_control.pop_count() as i32 * 5 + b_large_center_control.pop_count() as i32 * 2;
 
-        self.score += scores[board.side_to_move() as usize] - scores[board.side_to_move().opposite() as usize];
+        self.score += scores[board.side_to_move() as usize]
+            - scores[board.side_to_move().opposite() as usize];
         self.full_eval = true;
     }
 
     /// Checks if a position is drawn
     pub fn is_drawn(board: &Board) -> bool {
-        if board.is_drawn() { return true }
+        if board.is_drawn() {
+            return true;
+        }
 
         let occupancy = board.get_occupancy_bitboard();
         match occupancy.pop_count() {
@@ -108,22 +132,30 @@ impl Evaluation {
             3 => {
                 let other = board
                     .piece_type_on(
-                        (board.get_occupancy_bitboard() & !board.get_piecetype_bitboard(PieceType::King)).ls1b().unwrap()
-                    ).unwrap();
+                        (board.get_occupancy_bitboard()
+                            & !board.get_piecetype_bitboard(PieceType::King))
+                        .ls1b()
+                        .unwrap(),
+                    )
+                    .unwrap();
                 other == PieceType::Knight || other == PieceType::Bishop
-            },
+            }
             4 => {
-                let white_others = board.get_color_bitboard(Color::White) & !board.get_piecetype_bitboard(PieceType::King);
-                let black_others = board.get_color_bitboard(Color::Black) & !board.get_piecetype_bitboard(PieceType::King);
+                let white_others = board.get_color_bitboard(Color::White)
+                    & !board.get_piecetype_bitboard(PieceType::King);
+                let black_others = board.get_color_bitboard(Color::Black)
+                    & !board.get_piecetype_bitboard(PieceType::King);
                 white_others.pop_count() == black_others.pop_count()
-            },
-            _ => false
+            }
+            _ => false,
         }
     }
 
     /// Simulates a capture move and returns an approximation of its value
     pub fn see(board: &Board, m: Move) -> Score {
-        if !m.is_capture() { return 0; } // The move cannot be evaluated by SEE
+        if !m.is_capture() {
+            return 0;
+        } // The move cannot be evaluated by SEE
 
         let mut origin = m.origin();
         let target = m.target();
@@ -146,20 +178,23 @@ impl Evaluation {
             current_depth += 1;
             attacking_side = attacking_side.opposite();
 
-            gain[current_depth] = Self::MIDGAME_PIECE_TYPE_VALUE[attacker as usize] - gain[current_depth - 1]; // Score if the square is defended
-            if max(-gain[current_depth - 1], gain[current_depth]) < 0 { break; } // We can choose to not recapture
+            gain[current_depth] =
+                Self::MIDGAME_PIECE_TYPE_VALUE[attacker as usize] - gain[current_depth - 1]; // Score if the square is defended
+            if max(-gain[current_depth - 1], gain[current_depth]) < 0 {
+                break;
+            } // We can choose to not recapture
 
             dealt_with.set(origin);
             attackers = board.attackers_of_square(target, attacking_side, dealt_with) & !dealt_with;
 
             origin = match Self::least_valuable_attacker_square(board, attackers, attacking_side) {
                 Some(sq) => sq,
-                None => break
+                None => break,
             };
             attacker = board.piece_type_on(origin).unwrap();
         }
 
-        while current_depth != 1{
+        while current_depth != 1 {
             current_depth -= 1;
             gain[current_depth - 1] = -max(-gain[current_depth - 1], gain[current_depth]);
         }
@@ -167,11 +202,17 @@ impl Evaluation {
     }
 
     /// Given a bitboard of attackers, returns the least valuable attacker from that bitboard
-    fn least_valuable_attacker_square(board: &Board, attackers_bb: Bitboard, attacking_side: Color) -> Option<Square> {
+    fn least_valuable_attacker_square(
+        board: &Board,
+        attackers_bb: Bitboard,
+        attacking_side: Color,
+    ) -> Option<Square> {
         if attackers_bb != Bitboard::EMPTY {
             for bb in board.material_iter(attacking_side) {
                 let intersection = *bb & attackers_bb;
-                if let Some(sq) = intersection.ls1b() { return Some(sq) }
+                if let Some(sq) = intersection.ls1b() {
+                    return Some(sq);
+                }
             }
         }
         None

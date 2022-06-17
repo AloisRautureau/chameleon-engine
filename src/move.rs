@@ -1,38 +1,45 @@
 use std::fmt::{Display, Formatter};
-use crate::piece::PieceType;
+use crate::piece::{PieceType, Color};
 use crate::piece::PieceType::{Bishop, Knight, Queen, Rook};
 use crate::square::{Square, square_representation, self};
 
 /// Moves are stored as a 2bytes word, with the following alignment:
 /// - 6*2 bits for origin and destination square
 /// - 4 bits used for various flags
+#[repr(transparent)]
 #[derive(Debug, Copy, Clone, PartialOrd, PartialEq)]
 pub struct Move(u16);
 
 impl Move {
-    fn new(origin: Square, target: Square, flags: usize) -> Move {
-        Move(((origin << 10) | (target << 4) | flags) as u16)
+    fn new(origin: u16, target: u16, flags: u16) -> Move {
+        Move((origin << 10) | (target << 4) | flags)
     }
     pub fn new_quiet(origin: Square, target: Square) -> Move {
-        Self::new(origin, target, 0b0)
+        Self::new(origin as u16, target as u16, 0b0)
     }
     pub fn new_double_push(origin: Square, target: Square) -> Move {
-        Self::new(origin, target, 0b1)
+        Self::new(origin as u16, target as u16, 0b1)
     }
     pub fn new_capture(origin: Square, target: Square) -> Move {
-        Self::new(origin, target, 0b100)
+        Self::new(origin as u16, target as u16, 0b100)
     }
     pub fn new_en_passant(origin: Square, target: Square) -> Move {
-        Self::new(origin, target, 0b101)
+        Self::new(origin as u16, target as u16, 0b101)
     }
-    pub fn new_kingside_castle(white_move: bool) -> Move {
-        if white_move { Move(4194) } else { Move(62434) }
+    pub fn new_kingside_castle(color: Color) -> Move {
+        match color { 
+            Color::White => Move(4194),
+            Color::Black => Move(62434)
+        }
     }
-    pub fn new_queenside_castle(white_move: bool) -> Move {
-        if white_move { Move(4131) } else { Move(62371) }
+    pub fn new_queenside_castle(color: Color) -> Move {
+        match color {
+            Color::White => Move(4131),
+            Color::Black => Move(62371)
+        }
     }
     pub fn new_promotion(origin: Square, target: Square, promote_to: PieceType) -> Move {
-        Self::new(origin, target, 0b1000 | match promote_to {
+        Self::new(origin as u16, target as u16, 0b1000 | match promote_to {
             PieceType::Knight => 0b00,
             PieceType::Bishop => 0b01,
             PieceType::Rook => 0b10,
@@ -48,7 +55,7 @@ impl Move {
         ]
     }
     pub fn new_promotion_capture(origin: Square, target: Square, promote_to: PieceType) -> Move {
-        Self::new(origin, target, 0b1100 | match promote_to {
+        Self::new(origin as u16, target as u16, 0b1100 | match promote_to {
             PieceType::Knight => 0b00,
             PieceType::Bishop => 0b01,
             PieceType::Rook => 0b10,

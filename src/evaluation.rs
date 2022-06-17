@@ -108,7 +108,7 @@ impl Evaluation {
             3 => {
                 let other = board
                     .piece_type_on(
-                        (board.get_occupancy_bitboard() & !board.get_piecetype_bitboard(PieceType::King)).ls1b()
+                        (board.get_occupancy_bitboard() & !board.get_piecetype_bitboard(PieceType::King)).ls1b().unwrap()
                     ).unwrap();
                 other == PieceType::Knight || other == PieceType::Bishop
             },
@@ -171,7 +171,7 @@ impl Evaluation {
         if attackers_bb != Bitboard::EMPTY {
             for bb in board.material_iter(attacking_side) {
                 let intersection = *bb & attackers_bb;
-                if intersection != Bitboard::EMPTY { return Some(intersection.ls1b()) }
+                if let Some(sq) = intersection.ls1b() { return Some(sq) }
             }
         }
         None

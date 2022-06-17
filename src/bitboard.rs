@@ -22,17 +22,19 @@ impl Bitboard {
         Bitboard(bits)
     }
 
+    pub fn is_empty(&self) -> bool { self.0 == 0 }
     pub fn is_set(&self, sq: usize) -> bool { self.0 & (1 << sq) != 0 }
     pub fn set(&mut self, sq: usize) { self.0 |= 1 << sq }
     pub fn unset(&mut self, sq: usize) { self.0 &= !(1 << sq) }
 
-    pub fn ls1b(&self) -> usize {
+    pub fn ls1b(&self) -> Option<usize> {
+        if self.is_empty() { return None }
         if cfg!(target_feature = "bmi1") {
-            self.0.trailing_zeros() as usize
+            Some(self.0.trailing_zeros() as usize)
         } else {
             // Uses De Bruijn bitscan forward, which might be faster on some
             // CPU's which don't have the BMI set.
-            Self::DEBRUIJN_INDEX[(((self.0 & -(self.0 as i64) as u64) * Self::DEBRUIJN_64) >> 58) as usize]
+            Some(Self::DEBRUIJN_INDEX[(((self.0 & -(self.0 as i64) as u64) * Self::DEBRUIJN_64) >> 58) as usize])
         }
     }
 
@@ -48,13 +50,19 @@ impl Bitboard {
         25, 14, 19,  9, 13,  8,  7,  6
     ];
 
-    pub fn ms1b(&self) -> usize {
-        63 - self.0.leading_zeros() as usize
+    pub fn ms1b(&self) -> Option<usize> {
+        if self.is_empty() { return None }
+        Some(63 - self.0.leading_zeros() as usize)
     }
 
     pub fn vertical_flip(&self) -> Bitboard { Bitboard(self.0.swap_bytes()) }
 
     pub fn reset_ls1b(&mut self) { self.0 &= self.0 - 1 }
+    pub fn pop_ls1b(&mut self) -> Option<usize> {
+        let ls1b = self.ls1b();
+        self.reset_ls1b();
+        ls1b
+    }
 
     pub fn pop_count(&self) -> u32 { self.0.count_ones() }
 
@@ -128,14 +136,14 @@ impl Bitboard {
     pub fn pawn_east_attacks(pawns_bb: Bitboard, color: Color) -> Bitboard {
         match color {
             Color::White => Self::north_east_shift(pawns_bb),
-            Color::Black => Self::south_east_shift(pawns_bb)
+            Color::Black => Self::south_west_shift(pawns_bb)
         }
     }
 
     pub fn pawn_west_attacks(pawns_bb: Bitboard, color: Color) -> Bitboard {
         match color {
             Color::White => Self::north_west_shift(pawns_bb),
-            Color::Black => Self::south_west_shift(pawns_bb)
+            Color::Black => Self::south_east_shift(pawns_bb)
         }
     }
     pub fn pawn_attacks(pawns_bb: Bitboard, color: Color) -> Bitboard {
@@ -294,12 +302,7 @@ impl Iterator for Bitboard {
     type Item = Square;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.0 == 0u64 { None }
-        else {
-            let sq = self.ls1b();
-            self.reset_ls1b();
-            Some(sq)
-        }
+        self.pop_ls1b()
     }
 }
 

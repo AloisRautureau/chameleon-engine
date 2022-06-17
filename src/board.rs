@@ -128,18 +128,19 @@ impl Board {
 
     /// Given a string, makes the move if it is legal
     pub fn make_from_str(&mut self, move_str: &str) -> Result<(), String> {
-        let legal_moves = generate(self, GenType::Legal);
-        let (origin, target, promotion_target) = if let Some(mv) = Move::parse(move_str) {
-            mv
-        } else {
-            return Err(String::from("Move is not formatted correctly"))
+        let moves = generate(self, GenType::Legal);
+        let (origin, target, maybe_prom) = match Move::parse(move_str) {
+            Some(r) => r,
+            None => return Err(String::from("Failed to parse the move"))
         };
 
-        if let Some(mv) = legal_moves.into_iter().find(|m| m.origin() == origin && m.target() == target && m.promotion_target() == promotion_target) {
-            self.make(*mv);
+        if let Some(m) = &moves.iter().find(|m| {
+            m.origin() == origin && m.target() == target && m.promotion_target() == maybe_prom
+        }) {
+            self.make(**m);
             Ok(())
         } else {
-            Err(String::from("Illegal move"))
+            Err(String::from("The move wasn't formatted correctly or was illegal"))
         }
     }
 
@@ -280,11 +281,7 @@ impl Board {
     }
 
     pub fn king_square(&self, color: Color) -> Option<Square> {
-        if self.bitboards[color as usize][5] == Bitboard::EMPTY {
-            None
-        } else {
-            Some(self.bitboards[color as usize][5].ls1b())
-        }
+        self.bitboards[color as usize][5].ls1b()
     }
 
     pub fn piece_type_on(&self, sq: Square) -> Option<PieceType> {

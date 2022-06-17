@@ -19,6 +19,13 @@ arrayvec = "0.7.2"
 [build-dependencies]
 rand_mt = "4.1"
 
+[dev-dependencies]
+criterion = "0.3"
+
+[[bench]]
+name = "perft"
+harness = false
+
 [profile.release]
 lto = true
 panic = "abort"

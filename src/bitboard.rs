@@ -72,6 +72,7 @@ impl Bitboard {
     pub fn reset_ls1b(&mut self) {
         self.0 &= self.0 - 1
     }
+
     pub fn pop_ls1b(&mut self) -> Option<usize> {
         let ls1b = self.ls1b();
         self.reset_ls1b();
@@ -108,6 +109,19 @@ impl Bitboard {
     }
     pub fn south_east_shift(bb: Bitboard) -> Bitboard {
         Bitboard(bb.0 >> 7) & !Self::FILES[0]
+    }
+    /// Shifts using signed integers. Negative shifts are equivalent to
+    /// shifting right, and positive shifts equivalent to shifting left
+    /// ```
+    /// use chameleon::bitboard::Bitboard;
+    /// let bb = Bitboard::from_square(8);
+    /// assert_eq!(bb << 9, Bitboard::generalized_shift(bb, 9));
+    /// assert_eq!(bb >> 9, Bitboard::generalized_shift(bb, -9));
+    /// ```
+    pub fn generalized_shift(bb: Bitboard, shift: isize) -> Bitboard {
+        let left = shift as i8;
+        let right = -((shift >> 8) as i8 & left);
+        Bitboard((bb.0 >> right) << (right + left))
     }
 
     /*
@@ -433,21 +447,21 @@ impl Shl for Bitboard {
         Bitboard(self.0 << rhs.0)
     }
 }
-impl Shl<u64> for Bitboard {
+impl Shl<usize> for Bitboard {
     type Output = Bitboard;
-    fn shl(self, rhs: u64) -> Self::Output {
+    fn shl(self, rhs: usize) -> Self::Output {
         Bitboard(self.0 << rhs)
     }
 }
 impl Shr for Bitboard {
     type Output = Bitboard;
     fn shr(self, rhs: Self) -> Self::Output {
-        Bitboard(self.0 >> rhs.0)
+        Bitboard(self.0 << rhs.0)
     }
 }
-impl Shr<u64> for Bitboard {
+impl Shr<usize> for Bitboard {
     type Output = Bitboard;
-    fn shr(self, rhs: u64) -> Self::Output {
+    fn shr(self, rhs: usize) -> Self::Output {
         Bitboard(self.0 >> rhs)
     }
 }

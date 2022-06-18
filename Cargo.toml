@@ -1,6 +1,6 @@
 [package]
 name = "chameleon"
-version = "0.1.0"
+version = "1.1.0"
 authors = ["Aloïs 'baub' RAUTUREAU"]
 edition = "2021"
 description = "A toy-project chess engine"
@@ -20,7 +20,7 @@ arrayvec = "0.7.2"
 rand_mt = "4.1"
 
 [dev-dependencies]
-criterion = "0.3"
+criterion = { version = "0.3", features = ["html_reports"] }
 
 [[bench]]
 name = "perft"

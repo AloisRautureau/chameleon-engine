@@ -5,5 +5,5 @@ fn main() {
         env!("CARGO_PKG_AUTHORS")
     );
 
-    // chameleon::uci::UCI::run()
+    chameleon::uci::UCI::run()
 }

@@ -363,32 +363,20 @@ impl Board {
     }
 
     /// Generates an attack map
-    pub fn attack_map(&self, attacking_color: Color, ignore_king: bool) -> Bitboard {
-        let mut attack_map = Bitboard::EMPTY;
-        let occupancy = if ignore_king {
-            self.get_occupancy_bitboard() & !self.bitboards[attacking_color.opposite() as usize][5]
-        } else {
-            self.get_occupancy_bitboard()
-        };
+    pub fn attack_map(&self, attacking_color: Color, xray: Bitboard) -> Bitboard {
+        let occupancy = self.get_occupancy_bitboard() & !xray;
 
-        attack_map |=
-            Bitboard::pawn_attacks(self.bitboards[attacking_color as usize][0], attacking_color);
-        for sq in self.bitboards[attacking_color as usize][1] {
-            attack_map |= Bitboard::KNIGHT_ATTACKS[sq]
-        }
-        for sq in self.bitboards[attacking_color as usize][5] {
-            attack_map |= Bitboard::KING_ATTACKS[sq]
-        }
-        attack_map |= Bitboard::bishop_attacks_setwise(
+        Bitboard::pawn_attacks(self.bitboards[attacking_color as usize][0], attacking_color)
+        | Bitboard::knight_attacks_setwise(self.bitboards[attacking_color as usize][1])
+        | Bitboard::KING_ATTACKS[self.king_square(attacking_color).unwrap()]
+        | Bitboard::bishop_attacks_setwise(
             self.get_diagonal_sliders_bitboard(attacking_color),
             !occupancy,
-        );
-        attack_map |= Bitboard::rook_attacks_setwise(
+        )
+        | Bitboard::rook_attacks_setwise(
             self.get_cardinal_sliders_bitboard(attacking_color),
             !occupancy,
-        );
-
-        attack_map
+        )
     }
 
     /// Returns a bitboard with attackers of a square

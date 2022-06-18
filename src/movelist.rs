@@ -3,8 +3,9 @@ use crate::r#move::Move;
 use arrayvec::ArrayVec;
 use std::collections::VecDeque;
 
-pub const MAX_MOVELIST_CAPACITY: usize = 256;
+pub const MAX_MOVELIST_CAPACITY: usize = 255;
 
+#[repr(C)]
 #[derive(Clone)]
 pub struct MoveList(ArrayVec<Move, MAX_MOVELIST_CAPACITY>);
 impl Default for MoveList {

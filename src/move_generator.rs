@@ -31,8 +31,8 @@ pub fn generate(board: &Board, gen_type: GenType) -> MoveList {
     let shift_mult = if us == Color::White { 1 } else { -1 };
 
     // Gets a bitboard of checkers, as well as every attacked square (xraying our king)
-    let mut checkers = board.attackers_of_square(king_sq, them, Bitboard::EMPTY);
-    let attack_map = board.attack_map(them, true);
+    let checkers = board.attackers_of_square(king_sq, them, Bitboard::EMPTY);
+    let attack_map = board.attack_map(them, Bitboard::from_square(king_sq));
     let king_moves = Bitboard::KING_ATTACKS[king_sq] & !attack_map;
     for t in king_moves & push_mask {
         move_list.push(Move::new_quiet(king_sq, t))
@@ -43,11 +43,11 @@ pub fn generate(board: &Board, gen_type: GenType) -> MoveList {
 
     // Depending on our king's situation (check, double check, safe), we may
     // generate different subsets of pseudo-legal moves
-    if let Some(checker_sq) = checkers.next() {
-        if checkers.next().is_some() { return move_list } // Double check, only king moves
+    if checkers.more_than_one_set() { return move_list }
+    else if checkers.single_populated() {
         // In single check, we can only capture the checker or block its ray
-        push_mask = if gen_type == GenType::Captures { Bitboard::EMPTY } else { Bitboard::get_ray(king_sq, checker_sq) & !occupancy };
-        capture_mask = Bitboard::from_square(checker_sq);
+        push_mask = if gen_type == GenType::Captures { Bitboard::EMPTY } else { Bitboard::get_ray(king_sq, checkers.ls1b().unwrap()) & !occupancy };
+        capture_mask = checkers;
     } else {
         // If we're not in check at all, we can generate castling moves
         // as well as pinned pieces moves
@@ -72,9 +72,9 @@ pub fn generate(board: &Board, gen_type: GenType) -> MoveList {
             let attacks = match board.piece_type_on(pinned_sq).unwrap() {
                 PieceType::Pawn => {
                     let bb = Bitboard::from_square(pinned_sq);
-                    let cap = (Bitboard::generalized_shift(bb, 9 * shift_mult) & !Bitboard::FILES[7 - 7*us_index]) | ((Bitboard::generalized_shift(bb, 7 * shift_mult) & !Bitboard::FILES[7*us_index]));
-                    let push = Bitboard::generalized_shift(bb, 8 * shift_mult) & !occupancy;
-                    let dpush = Bitboard::generalized_shift(push & dpush_rank, 8 * shift_mult) & !occupancy;
+                    let cap = (Bitboard::generalized_shift(&bb, 9 * shift_mult) & !Bitboard::FILES[7 - 7*us_index]) | ((Bitboard::generalized_shift(&bb, 7 * shift_mult) & !Bitboard::FILES[7*us_index]));
+                    let push = Bitboard::generalized_shift(&bb, 8 * shift_mult) & !occupancy;
+                    let dpush = Bitboard::generalized_shift(&(push & dpush_rank), 8 * shift_mult) & !occupancy;
                     for target in push & pin_ray {
                         move_list.push(Move::new_quiet(pinned_sq, target))
                     }
@@ -116,42 +116,43 @@ pub fn generate(board: &Board, gen_type: GenType) -> MoveList {
     let mut pawns = board.get_piece_bitboard(PieceType::Pawn, us) & !pinned_mask;
     let promoting_pawns = pawns & pre_promo_rank;
     pawns = pawns ^ promoting_pawns;
-    let single_push = Bitboard::generalized_shift(pawns, 8 * shift_mult) & !occupancy;
+    let single_push = Bitboard::generalized_shift(&pawns, 8 * shift_mult) & !occupancy;
     for target in single_push & push_mask {
         move_list.push(Move::new_quiet(target + 8 - 16*us_index, target))
     }
-    for target in Bitboard::generalized_shift(single_push & dpush_rank, 8 * shift_mult) & push_mask {
+    for target in Bitboard::generalized_shift(&(single_push & dpush_rank), 8 * shift_mult) & push_mask {
         move_list.push(Move::new_double_push(target + 16 - 32*us_index, target))
     }
-    for target in Bitboard::generalized_shift(pawns, 7 * shift_mult) & !Bitboard::FILES[7*us_index] & capture_mask {
+    for target in Bitboard::generalized_shift(&pawns, 7 * shift_mult) & !Bitboard::FILES[7*us_index] & capture_mask {
         move_list.push(Move::new_capture(target + 7 - 14*us_index, target))
     }
-    for target in Bitboard::generalized_shift(pawns, 9 * shift_mult) & !Bitboard::FILES[7 - 7*us_index] & capture_mask {
+    for target in Bitboard::generalized_shift(&pawns, 9 * shift_mult) & !Bitboard::FILES[7 - 7*us_index] & capture_mask {
         move_list.push(Move::new_capture(target + 9 - 18*us_index, target))
     }
-    for target in Bitboard::generalized_shift(promoting_pawns, 8 * shift_mult) & push_mask {
+    for target in Bitboard::generalized_shift(&promoting_pawns, 8 * shift_mult) & push_mask {
         Move::all_promotions(target + 8 - 16*us_index, target)
             .map(|prom| move_list.push(prom));
     }
-    for target in Bitboard::generalized_shift(promoting_pawns, 7 * shift_mult) & !Bitboard::FILES[7*us_index] & capture_mask {
+    for target in Bitboard::generalized_shift(&promoting_pawns, 7 * shift_mult) & !Bitboard::FILES[7*us_index] & capture_mask {
         Move::all_promotions(target + 7 - 14*us_index, target)
             .map(|prom| move_list.push(prom));
     }
-    for target in Bitboard::generalized_shift(promoting_pawns, 9 * shift_mult) & !Bitboard::FILES[7 - 7*us_index] & capture_mask {
+    for target in Bitboard::generalized_shift(&promoting_pawns, 9 * shift_mult) & !Bitboard::FILES[7 - 7*us_index] & capture_mask {
         Move::all_promotions(target + 9 - 18*us_index, target)
             .map(|prom| move_list.push(prom));
     }
     if let Some(ep_sq) = board.en_passant_target() {
         let ep_bb = Bitboard::from_square(ep_sq);
-        let captured_bb = Bitboard::generalized_shift(ep_bb, 8 * -shift_mult);
-        // Used to check a rare case where taking en passant would leave us in checks
-        let discovered_rank = Bitboard::RANKS[crate::square::rank_of(captured_bb.ls1b().unwrap())] & Bitboard::RANKS[crate::square::rank_of(king_sq)];
-        let attackers_bb = ((Bitboard::generalized_shift(ep_bb, 7 * -shift_mult) & !Bitboard::FILES[7 - 7*us_index]) | (Bitboard::generalized_shift(ep_bb, 9 * -shift_mult) & !Bitboard::FILES[7*us_index])) & pawns;
-        if !attackers_bb.is_empty() 
+        let captured_bb = Bitboard::generalized_shift(&ep_bb, 8 * -shift_mult);
+        let origin_bb = ((Bitboard::generalized_shift(&ep_bb, 7 * -shift_mult) & !Bitboard::FILES[7 - 7*us_index]) | (Bitboard::generalized_shift(&ep_bb, 9 * -shift_mult) & !Bitboard::FILES[7*us_index])) & pawns;
+
+        // In rare cases, taking en passant might leave the king open to a check
+        let discovered_rank = Bitboard::RANKS[crate::square::rank_of(captured_bb.ls1b().unwrap())];
+        if !origin_bb.is_empty() 
             && !((ep_bb & push_mask).is_empty() 
             && (captured_bb & capture_mask).is_empty())
-            && (attackers_bb.pop_count() == 2 || (board.attackers_of_square(king_sq, them, attackers_bb | captured_bb) & discovered_rank).is_empty()) {
-            for origin in attackers_bb {
+            && (origin_bb.more_than_one_set() || (board.attackers_of_square(king_sq, them, origin_bb | captured_bb) & discovered_rank).is_empty()) {
+            for origin in origin_bb {
                 move_list.push(Move::new_en_passant(origin, ep_sq))
             }
         }

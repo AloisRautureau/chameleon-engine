@@ -97,8 +97,8 @@ impl Evaluation {
 
         // Center control evaluation
         let (w_attack_map, b_attack_map) = (
-            board.attack_map(Color::White, false),
-            board.attack_map(Color::Black, false),
+            board.attack_map(Color::White, Bitboard::EMPTY),
+            board.attack_map(Color::Black, Bitboard::EMPTY),
         );
         let (w_safe_squares, b_safe_squares) =
             (w_attack_map & !b_attack_map, b_attack_map & !w_attack_map);

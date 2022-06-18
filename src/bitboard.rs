@@ -7,13 +7,16 @@ use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, N
 // Build script to calculate lookup tables at compile time
 include!(concat!(env!("OUT_DIR"), "/lookup.rs"));
 
+#[repr(transparent)]
 #[derive(Debug, Copy, Clone, PartialOrd, PartialEq)]
 pub struct Bitboard(pub u64);
 
 impl Bitboard {
+    #[inline]
     pub fn from_square(square: usize) -> Bitboard {
         Bitboard(1u64 << square)
     }
+    #[inline]
     pub fn from_squares(squares: &[usize]) -> Bitboard {
         let mut bits: u64 = 0;
         for sq in squares {
@@ -22,19 +25,24 @@ impl Bitboard {
         Bitboard(bits)
     }
 
+    #[inline(always)]
     pub fn is_empty(&self) -> bool {
         self.0 == 0
     }
+    #[inline(always)]
     pub fn is_set(&self, sq: usize) -> bool {
         self.0 & (1 << sq) != 0
     }
+    #[inline(always)]
     pub fn set(&mut self, sq: usize) {
         self.0 |= 1 << sq
     }
+    #[inline(always)]
     pub fn unset(&mut self, sq: usize) {
         self.0 &= !(1 << sq)
     }
 
+    #[inline(always)]
     pub fn ls1b(&self) -> Option<usize> {
         if self.is_empty() {
             return None;
@@ -58,6 +66,7 @@ impl Bitboard {
         11, 46, 26, 40, 15, 34, 20, 31, 10, 25, 14, 19, 9, 13, 8, 7, 6,
     ];
 
+    #[inline(always)]
     pub fn ms1b(&self) -> Option<usize> {
         if self.is_empty() {
             return None;
@@ -69,45 +78,66 @@ impl Bitboard {
         Bitboard(self.0.swap_bytes())
     }
 
+    #[inline(always)]
     pub fn reset_ls1b(&mut self) {
         self.0 &= self.0 - 1
     }
 
+    #[inline(always)]
     pub fn pop_ls1b(&mut self) -> Option<usize> {
         let ls1b = self.ls1b();
         self.reset_ls1b();
         ls1b
     }
 
+    #[inline(always)]
     pub fn pop_count(&self) -> u32 {
         self.0.count_ones()
+    }
+
+    #[inline(always)]
+    pub fn single_populated(&self) -> bool {
+        (self.0 ^ (self.0 - 1)) >> 1 == self.0 - 1
+    }
+
+    #[inline(always)]
+    pub fn more_than_one_set(&self) -> bool {
+        self.0 & self.0-1 != 0
     }
 
     /*
     SHIFTS
      */
-    pub fn north_shift(bb: Bitboard) -> Bitboard {
+    #[inline]
+    pub fn north_shift(bb: &Bitboard) -> Bitboard {
         Bitboard(bb.0 << 8)
     }
-    pub fn south_shift(bb: Bitboard) -> Bitboard {
+    #[inline]
+    pub fn south_shift(bb: &Bitboard) -> Bitboard {
         Bitboard(bb.0 >> 8)
     }
-    pub fn west_shift(bb: Bitboard) -> Bitboard {
+    #[inline]
+    pub fn west_shift(bb: &Bitboard) -> Bitboard {
         Bitboard(bb.0 >> 1) & !Self::FILES[7]
     }
-    pub fn east_shift(bb: Bitboard) -> Bitboard {
+    #[inline]
+    pub fn east_shift(bb: &Bitboard) -> Bitboard {
         Bitboard(bb.0 << 1) & !Self::FILES[0]
     }
-    pub fn north_west_shift(bb: Bitboard) -> Bitboard {
+    #[inline]
+    pub fn north_west_shift(bb: &Bitboard) -> Bitboard {
         Bitboard(bb.0 << 7) & !Self::FILES[7]
     }
-    pub fn north_east_shift(bb: Bitboard) -> Bitboard {
+    #[inline]
+    pub fn north_east_shift(bb: &Bitboard) -> Bitboard {
         Bitboard(bb.0 << 9) & !Self::FILES[0]
     }
-    pub fn south_west_shift(bb: Bitboard) -> Bitboard {
+    #[inline]
+    pub fn south_west_shift(bb: &Bitboard) -> Bitboard {
         Bitboard(bb.0 >> 9) & !Self::FILES[7]
     }
-    pub fn south_east_shift(bb: Bitboard) -> Bitboard {
+    #[inline]
+    pub fn south_east_shift(bb: &Bitboard) -> Bitboard {
         Bitboard(bb.0 >> 7) & !Self::FILES[0]
     }
     /// Shifts using signed integers. Negative shifts are equivalent to
@@ -118,7 +148,8 @@ impl Bitboard {
     /// assert_eq!(bb << 9, Bitboard::generalized_shift(bb, 9));
     /// assert_eq!(bb >> 9, Bitboard::generalized_shift(bb, -9));
     /// ```
-    pub fn generalized_shift(bb: Bitboard, shift: isize) -> Bitboard {
+    #[inline]
+    pub fn generalized_shift(bb: &Bitboard, shift: isize) -> Bitboard {
         let left = shift as i8;
         let right = -((shift >> 8) as i8 & left);
         Bitboard((bb.0 >> right) << (right + left))
@@ -160,42 +191,58 @@ impl Bitboard {
     pub const CENTER: Bitboard = Bitboard(0x1818000000);
     pub const LARGE_CENTER: Bitboard = Bitboard(0x3c24243c0000);
 
+    #[inline]
     pub fn get_ray(origin: Square, target: Square) -> Bitboard {
         Self::ORIGIN_TARGET_RAYS[origin][target]
     }
 
+    #[inline]
     pub fn pawn_pushes(pawns_bb: Bitboard, empty: Bitboard, color: Color) -> Bitboard {
         let shift = match color {
-            Color::White => Self::north_shift(pawns_bb),
-            Color::Black => Self::south_shift(pawns_bb),
+            Color::White => Self::north_shift(&pawns_bb),
+            Color::Black => Self::south_shift(&pawns_bb),
         };
         shift & empty
     }
 
+    #[inline]
     pub fn pawn_double_pushes(pawns_bb: Bitboard, empty: Bitboard, color: Color) -> Bitboard {
         let single_push = Self::pawn_pushes(pawns_bb, empty, color);
         let shift = match color {
-            Color::White => Self::north_shift(single_push & Self::RANKS[2]),
-            Color::Black => Self::south_shift(single_push & Self::RANKS[5]),
+            Color::White => Self::north_shift(&(single_push & Self::RANKS[2])),
+            Color::Black => Self::south_shift(&(single_push & Self::RANKS[5])),
         };
         shift & empty
     }
 
+    #[inline]
     pub fn pawn_east_attacks(pawns_bb: Bitboard, color: Color) -> Bitboard {
         match color {
-            Color::White => Self::north_east_shift(pawns_bb),
-            Color::Black => Self::south_west_shift(pawns_bb),
+            Color::White => Self::north_east_shift(&pawns_bb),
+            Color::Black => Self::south_west_shift(&pawns_bb),
         }
     }
-
+    #[inline]
     pub fn pawn_west_attacks(pawns_bb: Bitboard, color: Color) -> Bitboard {
         match color {
-            Color::White => Self::north_west_shift(pawns_bb),
-            Color::Black => Self::south_east_shift(pawns_bb),
+            Color::White => Self::north_west_shift(&pawns_bb),
+            Color::Black => Self::south_east_shift(&pawns_bb),
         }
     }
+    #[inline]
     pub fn pawn_attacks(pawns_bb: Bitboard, color: Color) -> Bitboard {
         Self::pawn_west_attacks(pawns_bb, color) | Self::pawn_east_attacks(pawns_bb, color)
+    }
+
+    #[inline]
+    pub fn knight_attacks_setwise(bb: Bitboard) -> Bitboard {
+        let l1 = (bb >> 1) & 0x7f7f7f7f7f7f7f7f;
+        let l2 = (bb >> 2) & 0x3f3f3f3f3f3f3f3f;
+        let r1 = (bb << 1) & 0xfefefefefefefefe;
+        let r2 = (bb << 2) & 0xfcfcfcfcfcfcfcfc;
+        let h1 = l1 | r1;
+        let h2 = l2 | r2;
+        (h1<<16) | (h1>>16) | (h2<<8) | (h2>>8)
     }
 
     pub fn slider_attacks(piece_type: PieceType, origin: Square, occupancy: Bitboard) -> Bitboard {
@@ -209,12 +256,14 @@ impl Bitboard {
         }
     }
 
+    #[inline]
     pub fn bishop_attacks(origin: Square, occupancy: Bitboard) -> Bitboard {
         let blockers = occupancy & Self::BISHOP_MASKS[origin];
         let key =
             (blockers.0 * Self::BISHOP_MAGICS[origin]) >> (64 - Self::BISHOP_MAGIC_SHIFTS[origin]);
         Self::BISHOP_ATTACKS_TABLE[origin][key as usize]
     }
+    #[inline]
     pub fn xray_bishop_attacks(
         origin: Square,
         occupancy: Bitboard,
@@ -225,12 +274,14 @@ impl Bitboard {
         attacks ^ Self::bishop_attacks(origin, occupancy ^ blockers)
     }
 
+    #[inline]
     pub fn rook_attacks(origin: Square, occupancy: Bitboard) -> Bitboard {
         let blockers = occupancy & Self::ROOK_MASKS[origin];
         let key =
             (blockers.0 * Self::ROOK_MAGICS[origin]) >> (64 - Self::ROOK_MAGIC_SHIFTS[origin]);
         Self::ROOK_ATTACKS_TABLE[origin][key as usize]
     }
+    #[inline]
     pub fn xray_rook_attacks(
         origin: Square,
         occupancy: Bitboard,
@@ -241,13 +292,14 @@ impl Bitboard {
         attacks ^ Self::rook_attacks(origin, occupancy ^ blockers)
     }
 
+    #[inline]
     pub fn bishop_attacks_setwise(bishops: Bitboard, occupancy: Bitboard) -> Bitboard {
         Self::nw_occlued_fill(bishops, occupancy)
             | Self::sw_occlued_fill(bishops, occupancy)
             | Self::ne_occlued_fill(bishops, occupancy)
             | Self::se_occlued_fill(bishops, occupancy)
     }
-
+    #[inline]
     pub fn rook_attacks_setwise(rooks: Bitboard, occupancy: Bitboard) -> Bitboard {
         Self::n_occlued_fill(rooks, occupancy)
             | Self::s_occlued_fill(rooks, occupancy)
@@ -256,24 +308,25 @@ impl Bitboard {
     }
 
     // Kogge-Stone fill algorithms for setwise slider attacks
+    #[inline]
     fn s_occlued_fill(mut origin_set: Bitboard, mut blockers: Bitboard) -> Bitboard {
         origin_set |= blockers & origin_set >> 8;
         blockers &= blockers >> 8;
         origin_set |= blockers & origin_set >> 16;
         blockers &= blockers >> 16;
         origin_set |= blockers & origin_set >> 32;
-        Self::south_shift(origin_set)
+        Self::south_shift(&origin_set)
     }
-
+    #[inline]
     fn n_occlued_fill(mut origin_set: Bitboard, mut blockers: Bitboard) -> Bitboard {
         origin_set |= blockers & origin_set << 8;
         blockers &= blockers << 8;
         origin_set |= blockers & origin_set << 16;
         blockers &= blockers << 16;
         origin_set |= blockers & origin_set << 32;
-        Self::north_shift(origin_set)
+        Self::north_shift(&origin_set)
     }
-
+    #[inline]
     fn e_occlued_fill(mut origin_set: Bitboard, mut blockers: Bitboard) -> Bitboard {
         blockers &= !Self::FILES[0];
         origin_set |= blockers & origin_set << 1;
@@ -281,9 +334,9 @@ impl Bitboard {
         origin_set |= blockers & origin_set << 2;
         blockers &= blockers << 2;
         origin_set |= blockers & origin_set << 4;
-        Self::east_shift(origin_set)
+        Self::east_shift(&origin_set)
     }
-
+    #[inline]
     fn ne_occlued_fill(mut origin_set: Bitboard, mut blockers: Bitboard) -> Bitboard {
         blockers &= !Self::FILES[0];
         origin_set |= blockers & origin_set << 9;
@@ -291,9 +344,9 @@ impl Bitboard {
         origin_set |= blockers & origin_set << 18;
         blockers &= blockers << 18;
         origin_set |= blockers & origin_set << 36;
-        Self::north_east_shift(origin_set)
+        Self::north_east_shift(&origin_set)
     }
-
+    #[inline]
     fn se_occlued_fill(mut origin_set: Bitboard, mut blockers: Bitboard) -> Bitboard {
         blockers &= !Self::FILES[0];
         origin_set |= blockers & origin_set >> 7;
@@ -301,9 +354,9 @@ impl Bitboard {
         origin_set |= blockers & origin_set >> 14;
         blockers &= blockers >> 14;
         origin_set |= blockers & origin_set >> 28;
-        Self::south_east_shift(origin_set)
+        Self::south_east_shift(&origin_set)
     }
-
+    #[inline]
     fn w_occlued_fill(mut origin_set: Bitboard, mut blockers: Bitboard) -> Bitboard {
         blockers &= !Self::FILES[7];
         origin_set |= blockers & origin_set >> 1;
@@ -311,9 +364,9 @@ impl Bitboard {
         origin_set |= blockers & origin_set >> 2;
         blockers &= blockers >> 2;
         origin_set |= blockers & origin_set >> 4;
-        Self::west_shift(origin_set)
+        Self::west_shift(&origin_set)
     }
-
+    #[inline]
     fn sw_occlued_fill(mut origin_set: Bitboard, mut blockers: Bitboard) -> Bitboard {
         blockers &= !Self::FILES[7];
         origin_set |= blockers & origin_set >> 9;
@@ -321,9 +374,9 @@ impl Bitboard {
         origin_set |= blockers & origin_set >> 18;
         blockers &= blockers >> 18;
         origin_set |= blockers & origin_set >> 36;
-        Self::south_west_shift(origin_set)
+        Self::south_west_shift(&origin_set)
     }
-
+    #[inline]
     fn nw_occlued_fill(mut origin_set: Bitboard, mut blockers: Bitboard) -> Bitboard {
         blockers &= !Self::FILES[7];
         origin_set |= blockers & origin_set << 7;
@@ -331,7 +384,7 @@ impl Bitboard {
         origin_set |= blockers & origin_set << 14;
         blockers &= blockers << 14;
         origin_set |= blockers & origin_set << 28;
-        Self::north_west_shift(origin_set)
+        Self::north_west_shift(&origin_set)
     }
 }
 

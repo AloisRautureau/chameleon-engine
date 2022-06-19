@@ -102,7 +102,7 @@ impl Bitboard {
 
     #[inline(always)]
     pub fn more_than_one_set(&self) -> bool {
-        self.0 & self.0-1 != 0
+        self.0 & self.0 - 1 != 0
     }
 
     /*
@@ -242,7 +242,7 @@ impl Bitboard {
         let r2 = (bb << 2) & 0xfcfcfcfcfcfcfcfc;
         let h1 = l1 | r1;
         let h2 = l2 | r2;
-        (h1<<16) | (h1>>16) | (h2<<8) | (h2>>8)
+        (h1 << 16) | (h1 >> 16) | (h2 << 8) | (h2 >> 8)
     }
 
     pub fn slider_attacks(piece_type: PieceType, origin: Square, occupancy: Bitboard) -> Bitboard {

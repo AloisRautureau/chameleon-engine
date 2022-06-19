@@ -153,6 +153,12 @@ impl Display for Move {
     }
 }
 
+impl Default for Move {
+    fn default() -> Self {
+        Self::NULL_MOVE
+    }
+}
+
 pub enum MoveFlags {
     Quiet,
     DoublePush,

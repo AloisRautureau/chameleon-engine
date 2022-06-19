@@ -46,19 +46,22 @@ impl Evaluation {
         let mut mg_scores = [0, 0];
         let mut eg_scores = [0, 0];
 
-        for color in [Color::Black, Color::White] {
-            for (piece, bb) in board.material_iter(color).enumerate() {
-                for sq in if color == Color::White {
-                    *bb
-                } else {
-                    bb.vertical_flip()
-                } {
-                    phase -= Self::PHASE_VALUE[piece];
-                    mg_scores[color as usize] += Self::MIDGAME_PIECE_TYPE_VALUE[piece]
-                        + MIDGAME_PIECE_SQUARE_TABLE[piece][sq];
-                    eg_scores[color as usize] += Self::ENDGAME_PIECE_TYPE_VALUE[piece]
-                        + ENDGAME_PIECE_SQUARE_TABLE[piece][sq];
-                }
+        for (piece, bb) in board.material_iter(Color::White).enumerate() {
+            for sq in *bb {
+                phase -= Self::PHASE_VALUE[piece];
+                mg_scores[Color::White as usize] +=
+                    Self::MIDGAME_PIECE_TYPE_VALUE[piece] + MIDGAME_PIECE_SQUARE_TABLE[piece][sq];
+                eg_scores[Color::White as usize] +=
+                    Self::ENDGAME_PIECE_TYPE_VALUE[piece] + ENDGAME_PIECE_SQUARE_TABLE[piece][sq];
+            }
+        }
+        for (piece, bb) in board.material_iter(Color::Black).enumerate() {
+            for sq in bb.vertical_flip() {
+                phase -= Self::PHASE_VALUE[piece];
+                mg_scores[Color::Black as usize] +=
+                    Self::MIDGAME_PIECE_TYPE_VALUE[piece] + MIDGAME_PIECE_SQUARE_TABLE[piece][sq];
+                eg_scores[Color::Black as usize] +=
+                    Self::ENDGAME_PIECE_TYPE_VALUE[piece] + MIDGAME_PIECE_SQUARE_TABLE[piece][sq];
             }
         }
 
@@ -70,10 +73,9 @@ impl Evaluation {
             GamePhase::EndGame
         };
         phase = (phase * 256 + (Self::MAX_PHASE / 2)) / Self::MAX_PHASE;
-        let mg_score = mg_scores[board.side_to_move() as usize]
-            - mg_scores[board.side_to_move().opposite() as usize];
-        let eg_score = eg_scores[board.side_to_move() as usize]
-            - eg_scores[board.side_to_move().opposite() as usize];
+        let us_index = board.side_to_move() as usize;
+        let mg_score = mg_scores[us_index] - mg_scores[us_index ^ 1];
+        let eg_score = eg_scores[us_index] - eg_scores[us_index ^ 1];
 
         Evaluation {
             score: ((mg_score * (256 - phase)) + (eg_score * phase)) / 256,
@@ -91,6 +93,53 @@ impl Evaluation {
         }
 
         let mut scores: [Score; 2] = [0; 2];
+
+        // Opened files evaluation
+        let mut open_files = Bitboard::EMPTY;
+        let mut semi_open_files = [Bitboard::EMPTY, Bitboard::EMPTY];
+        for file in Bitboard::FILES {
+            if (board.get_piecetype_bitboard(PieceType::Pawn) & file).is_empty() {
+                open_files |= file
+            } else if (board.get_piecetype_bitboard(PieceType::Pawn) & file).single_populated() {
+                if (board.get_piece_bitboard(PieceType::Pawn, Color::White) & file).is_empty() {
+                    semi_open_files[Color::Black as usize] |= file
+                }
+                if (board.get_piece_bitboard(PieceType::Pawn, Color::Black) & file).is_empty() {
+                    semi_open_files[Color::White as usize] |= file
+                }
+            }
+        }
+        // Rook on open/semi-open file
+        scores[Color::White as usize] += (board.get_piece_bitboard(PieceType::Rook, Color::White)
+            & open_files)
+            .pop_count() as i32
+            * 20
+            + (board.get_piece_bitboard(PieceType::Rook, Color::White)
+                & semi_open_files[Color::White as usize])
+                .pop_count() as i32
+                * 10;
+        scores[Color::Black as usize] += (board.get_piece_bitboard(PieceType::Rook, Color::Black)
+            & open_files)
+            .pop_count() as i32
+            * 20
+            + (board.get_piece_bitboard(PieceType::Rook, Color::Black)
+                & semi_open_files[Color::Black as usize])
+                .pop_count() as i32
+                * 10;
+
+        // Bishop pair bonus
+        scores[Color::White as usize] += (board
+            .get_piece_bitboard(PieceType::Bishop, Color::White)
+            .pop_count() as i32
+            % 2
+            + 1)
+            * 30;
+        scores[Color::Black as usize] += (board
+            .get_piece_bitboard(PieceType::Bishop, Color::Black)
+            .pop_count() as i32
+            % 2
+            + 1)
+            * 30;
 
         // Mobility evaluation
         // TODO

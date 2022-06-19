@@ -1,4 +1,3 @@
-use std::collections::VecDeque;
 use std::fmt::Display;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -82,44 +81,44 @@ impl Default for SearchOptions {
 
 /// Lets us run the search in a separate thread, so that the UCI implementation
 /// stays responsive even during search
+pub struct Worker {
+    pub handle: JoinHandle<()>,
+    pub result: Arc<Mutex<Search>>,
+    pub stop_handle: Arc<AtomicBool>
+}
 pub struct SearchFramework {
     transposition_table: Arc<TranspositionTable>,
-    search_handle: Option<JoinHandle<()>>,
-    search_result: Option<Arc<Mutex<Search>>>,
-    stop_handle: Option<Arc<AtomicBool>>,
+    workers: Vec<Worker>
 }
 impl SearchFramework {
     pub fn new() -> SearchFramework {
         SearchFramework {
             transposition_table: Arc::new(TranspositionTable::new()),
-            search_handle: None,
-            search_result: None,
-            stop_handle: None,
+            workers: vec!(),
         }
     }
 
-    pub fn run_search(&mut self, position: &Board, options: SearchOptions) {
-        let (search_handle, stop_handle, search_result) =
-            Search::new(position, options, &self.transposition_table);
-        self.search_handle = Some(search_handle);
-        self.search_result = Some(search_result);
-        self.stop_handle = Some(stop_handle);
+    pub fn run_search(&mut self, position: &Board, options: &SearchOptions) {
+        let thread_count = 1;
+        for i in 0..thread_count {
+            println!("spawning thread {}", i);
+            self.workers.push(Search::new(position, options, &self.transposition_table))
+        }
     }
 
     pub fn stop_search(&mut self) -> Option<Search> {
-        self.stop_handle
-            .as_ref()
-            .unwrap()
-            .store(true, Ordering::SeqCst);
-        self.search_handle = None;
-        match &self.search_result {
-            Some(arc_mutex) => {
-                let result = (*arc_mutex.lock().unwrap()).clone();
-                self.search_result = None;
-                Some(result)
-            }
-            None => None,
+        let result = if let Some(worker) = self.workers.first() {
+            (*worker.result.lock().unwrap()).clone()
+        } else {
+            return None
+        };
+
+        for worker in &self.workers {
+            worker.stop_handle.store(true, Ordering::SeqCst);
         }
+        self.workers.clear();
+
+        Some(result)
     }
 
     pub fn probe_table(&self, board: &Board) -> Option<SearchInfo> {
@@ -132,15 +131,14 @@ impl SearchFramework {
 pub struct Search {
     pub best_move: Option<Move>,
     pub score: Score,
-    pub principal_variation: MoveList,
+    pub principal_variation: Vec<Move>,
     pub time: Duration,
     pub depth_reached: i32,
     pub nodes_searched: u128,
 }
 struct SearchContext<'a> {
     pub transposition_table: Arc<TranspositionTable>,
-    pub killers: [Option<Move>; 32],
-    pub pv: MoveList,
+    pub killers: [[Option<Move>; 3]; 32],
     pub total_depth: i32,
     pub null_allowed: bool,
     pub nodes_searched: &'a mut u128,
@@ -153,18 +151,16 @@ impl Search {
 
     /// Runs a new search with the given options, returning a handle to the thread running said
     /// search, as well as a mutex holding the result
-    /// TODO: This might be more properly done by using async programming patterns
     pub fn new(
         position: &Board,
-        options: SearchOptions,
+        options: &SearchOptions,
         transposition_table: &Arc<TranspositionTable>,
-    ) -> (JoinHandle<()>, Arc<AtomicBool>, Arc<Mutex<Search>>) {
+    ) -> Worker {
         let result = Arc::new(Mutex::new(Search::default()));
         let stop_handle = Arc::new(AtomicBool::new(false));
 
-        // Main search worker
         let internal_position = position.clone();
-        let internal_options = options;
+        let internal_options = options.clone();
         let thread_result = Arc::clone(&result);
         let stop_signal = Arc::clone(&stop_handle);
         let tt_handle = Arc::clone(transposition_table);
@@ -179,7 +175,11 @@ impl Search {
             );
         });
 
-        (handle, stop_handle, result)
+        Worker {
+            handle,
+            result,
+            stop_handle
+        }
     }
 
     /// Searches a given position, writing the results as it goes in a mutex
@@ -217,7 +217,6 @@ impl Search {
         let mut context = SearchContext {
             transposition_table,
             killers: Default::default(),
-            pv: Default::default(),
             total_depth: 1,
             null_allowed: true,
             nodes_searched: &mut nodes,
@@ -240,7 +239,6 @@ impl Search {
                 previous_iteration_score - Self::BASE_WINDOW,
                 previous_iteration_score + Self::BASE_WINDOW,
             );
-            let mut iteration_pv = VecDeque::with_capacity(context.total_depth as usize);
             let mut iteration_mv_scores: Vec<(Move, Score)> = Vec::with_capacity(root_moves.len());
             let moves_iter = root_moves.into_iter();
 
@@ -248,19 +246,16 @@ impl Search {
                 if (context.should_stop)() {
                     break;
                 }
-                let mut move_pv = VecDeque::with_capacity(context.total_depth as usize);
                 position.make(*mv);
                 let mut score = -Search::alpha_beta(
                     &mut position,
                     -beta,
                     -alpha,
                     context.total_depth - 1,
-                    &mut move_pv,
                     &mut context,
                 );
                 // The score falls out of our aspiration window, therefore we widen it
                 if score <= alpha || score >= beta {
-                    println!("doing a research {} is out of [{}, {}]", score, alpha, beta);
                     if score <= alpha {
                         aspiration_window.0 *= 2
                     } else {
@@ -273,7 +268,6 @@ impl Search {
                         -beta,
                         -alpha,
                         context.total_depth - 1,
-                        &mut move_pv,
                         &mut context,
                     );
                 }
@@ -287,17 +281,11 @@ impl Search {
                         Err(i) => i,
                     };
                 iteration_mv_scores.insert(insertion_pos, (*mv, score));
-                if insertion_pos == 0 {
-                    iteration_pv = move_pv;
-                    iteration_pv.push_front(*mv);
-                }
             }
-            context.pv = MoveList::from(iteration_pv);
-
             let (mv, score) = *iteration_mv_scores
                 .first()
                 .expect("Tried searching a mated position");
-
+            
             context.transposition_table.set(
                 position.get_hash(),
                 SearchInfo {
@@ -306,7 +294,6 @@ impl Search {
                     depth_searched: context.total_depth,
                     score,
                     node_type: NodeType::Exact,
-                    age: position.halfmove_clock() % 2 == 0,
                 },
             );
 
@@ -315,7 +302,7 @@ impl Search {
             (*res).score = score;
             (*res).depth_reached = context.total_depth;
             (*res).time = start.elapsed();
-            (*res).principal_variation = context.pv.clone();
+            (*res).principal_variation = Self::collect_pv(&mut position, &context);
             (*res).nodes_searched = *context.nodes_searched;
 
             if print_uci {
@@ -350,10 +337,12 @@ impl Search {
         mut alpha: Score,
         beta: Score,
         mut depth: i32,
-        local_pv: &mut VecDeque<Move>,
         context: &mut SearchContext,
     ) -> Score {
         *context.nodes_searched += 1;
+
+        // TT hit
+        let tt_info = context.transposition_table.get(position.get_hash());
 
         if Evaluation::is_drawn(position) {
             return Evaluation::DRAW_SCORE;
@@ -394,7 +383,7 @@ impl Search {
             context.null_allowed = false;
             position.make(Move::NULL_MOVE);
             let score =
-                -Self::alpha_beta(position, -beta, -beta + 1, reduced_depth, local_pv, context);
+                -Self::alpha_beta(position, -beta, -beta + 1, reduced_depth, context);
             position.unmake();
 
             if score >= beta {
@@ -413,25 +402,28 @@ impl Search {
                 Evaluation::DRAW_SCORE
             };
         }
-        let moves_iter = moves.best_first_iter(&Self::score_moves(position, depth, context));
+        let (mut best_move, mut best_score, mut node_type) = if let Some(info) = tt_info {
+            (info.best_move, info.score, info.node_type)
+        } else {
+            (None, -Evaluation::MATE_SCORE, NodeType::All)
+        };
+        let moves_iter = moves.best_first_iter(&Self::score_moves(position, depth, best_move, context));
 
         // PV search
         let mut search_pv = true;
-
         for (mv_index, mv) in moves_iter.enumerate() {
-            let mut move_pv = VecDeque::with_capacity(depth as usize);
             position.make(*mv);
             let mut score;
             if search_pv {
                 score =
-                    -Self::alpha_beta(position, -beta, -alpha, depth - 1, &mut move_pv, context);
+                    -Self::alpha_beta(position, -beta, -alpha, depth - 1, context);
             } else {
                 // Late Move Reduction scheme
-                let allow_reduction = mv_index > 4 && !in_check && depth <= 3 && !mv.is_capture();
+                let allow_reduction = mv_index > 4 && !in_check && depth >= 3 && !mv.is_capture();
                 let depth_to_search = if allow_reduction && mv_index < 6 {
                     depth - 2
                 } else if allow_reduction {
-                    depth >> 2
+                    depth >> 1
                 } else {
                     depth - 1
                 };
@@ -440,7 +432,6 @@ impl Search {
                     -alpha - 1,
                     -alpha,
                     depth_to_search,
-                    &mut move_pv,
                     context,
                 );
                 // If score is better than alpha, re-search at full depth in case
@@ -451,7 +442,6 @@ impl Search {
                         -beta,
                         -alpha,
                         depth - 1,
-                        &mut move_pv,
                         context,
                     );
                 }
@@ -465,33 +455,44 @@ impl Search {
                         best_move: Some(*mv),
                         depth_searched: depth,
                         score,
-                        node_type: NodeType::Beta,
-                        age: position.halfmove_clock() % 2 == 0,
+                        node_type: NodeType::Cutoff,
                     },
                 );
+                // Store the move for move ordering killer heuristics
                 if !mv.is_capture() {
-                    context.killers[(context.total_depth - depth) as usize] = Some(*mv)
+                    for (i, killer) in context.killers[(context.total_depth - depth) as usize].iter_mut().enumerate() {
+                        match killer {
+                            Some(m) => if m == mv { break } else if i == 2 { *m = *mv },
+                            None => { *killer = Some(*mv); break }
+                        }
+                    }
+                    // Swap the ordering around so that we don't always replace
+                    // the last killer
+                    context.killers[(context.total_depth - depth) as usize].swap(0, 1);
+                    context.killers[(context.total_depth - depth) as usize].swap(0, 2);
                 }
                 return beta;
             }
             if score > alpha {
-                context.transposition_table.set(
-                    position.get_hash(),
-                    SearchInfo {
-                        position_hash: position.get_hash(),
-                        best_move: Some(*mv),
-                        depth_searched: depth,
-                        score,
-                        node_type: NodeType::Exact,
-                        age: position.halfmove_clock() % 2 == 0,
-                    },
-                );
-                *local_pv = move_pv;
-                local_pv.push_front(*mv);
+                node_type = NodeType::Exact;
                 search_pv = false;
-                alpha = score
+                alpha = score;
+            }
+            if score > best_score {
+                best_score = score;
+                best_move = Some(*mv);
             }
         }
+        context.transposition_table.set(
+            position.get_hash(),
+            SearchInfo {
+                position_hash: position.get_hash(),
+                best_move,
+                depth_searched: depth,
+                score: alpha,
+                node_type,
+            }
+        );
 
         alpha
     }
@@ -558,28 +559,17 @@ impl Search {
     fn score_moves<'a>(
         board: &'a Board,
         depth: i32,
+        hash_move: Option<Move>,
         context: &SearchContext,
     ) -> impl Fn(&Move) -> Score + 'a {
-        let pv_move = *context
-            .pv
-            .get((context.total_depth - depth) as usize)
-            .unwrap_or(&Move::NULL_MOVE);
-        let killer =
-            context.killers[(context.total_depth - depth) as usize].unwrap_or(Move::NULL_MOVE);
-        let hash_move = context
-            .transposition_table
-            .get(board.get_hash())
-            .map(|i| i.best_move.unwrap())
-            .unwrap_or(Move::NULL_MOVE);
+        let killers = context.killers[(context.total_depth - depth) as usize];
         move |&m| {
-            if m == pv_move {
-                1000000
-            } else if m == hash_move {
+            if Some(m) == hash_move {
                 100000
             } else if m.is_capture() {
-                Evaluation::see(board, m) + 1
-            } else if m == killer {
-                0
+                Evaluation::see(board, m)
+            } else if killers.contains(&Some(m)) {
+                200
             } else {
                 -10
             }
@@ -588,6 +578,20 @@ impl Search {
 
     fn score_quiescence(board: &Board) -> impl Fn(&Move) -> Score + '_ {
         move |&m| Evaluation::see(board, m)
+    }
+
+    fn collect_pv(board: &mut Board, context: &SearchContext) -> Vec<Move> {
+        let mut pv = Vec::with_capacity(context.total_depth as usize);
+        while let Some(m) = context.transposition_table.get_hash_move(board.get_hash()) {
+            board.make(m);
+            pv.push(m);
+        }
+        let mut depth = pv.len();
+        while depth != 0 {
+            board.unmake();
+            depth -= 1;
+        }
+        pv
     }
 }
 impl Display for Search {
@@ -601,7 +605,7 @@ impl Display for Search {
             self.time.as_millis(),
             self.nodes_searched,
             ((self.nodes_searched as f64) / self.time.as_secs_f64()) as u64,
-            self.principal_variation,
+            self.principal_variation.iter().fold(String::new(), |acc, m| format!("{} {}", acc, m)).trim(),
             if mate_score { "mate" } else { "cp" },
             if mate_score {
                 if self.score < 0 {

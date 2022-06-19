@@ -76,7 +76,7 @@ impl UCI {
             }
             "go" => self
                 .search_framework
-                .run_search(&self.board, self.parse_go_args(args.map(String::from))),
+                .run_search(&self.board, &self.parse_go_args(args.map(String::from))),
             "stop" => {
                 if let Some(result) = self.search_framework.stop_search() {
                     UCI::send(UCICommand::BestMove(result.best_move.unwrap()))

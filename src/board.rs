@@ -24,7 +24,7 @@ pub struct Board {
     reversible_moves: u32,
 
     history_entries: Vec<HistoryEntry>,
-    repeatable: Vec<Hash>, // Enables repetition detection
+    last_irreversible_ply: usize,
     hash: Hash,
 }
 
@@ -41,7 +41,7 @@ impl Board {
             reversible_moves: 0,
 
             history_entries: Vec::with_capacity(64),
-            repeatable: Vec::with_capacity(16),
+            last_irreversible_ply: 0,
             hash: 0,
         };
         b.set_fen(fen);
@@ -60,14 +60,14 @@ impl Board {
         let origin = mv.origin();
         let target = mv.target();
 
-        let before_move_hash = self.hash;
-
         let history_entry = HistoryEntry {
+            hash: self.hash,
             move_played: mv,
             captured_piece: self.remove_piece(target),
             ep_target: self.ep_target,
             castling_rights: self.castling_rights,
             reversible_moves: self.reversible_moves,
+            last_irreversible_ply: self.last_irreversible_ply
         };
 
         self.hash ^= ZobristHasher::castling_rights_hash(self.castling_rights);
@@ -94,7 +94,6 @@ impl Board {
         match mv.flags() {
             MoveFlags::Quiet if moved_piece.piece_type != Pawn => {
                 self.reversible_moves += 1;
-                self.repeatable.push(before_move_hash);
             }
             MoveFlags::DoublePush => {
                 self.ep_target = Some((target + origin) / 2);
@@ -137,7 +136,7 @@ impl Board {
         self.ply += 1;
         if self.reversible_moves == history_entry.reversible_moves {
             self.reversible_moves = 0;
-            self.repeatable = Vec::with_capacity(16);
+            self.last_irreversible_ply = self.history_entries.len();
         }
 
         self.history_entries.push(history_entry);
@@ -166,11 +165,13 @@ impl Board {
     /// Makes a null move (the side to move passes its turn). Only used in search
     fn make_null(&mut self) {
         let hist = HistoryEntry {
+            hash: self.hash,
             move_played: Move::NULL_MOVE,
             ep_target: self.ep_target,
             castling_rights: self.castling_rights,
             reversible_moves: self.reversible_moves,
             captured_piece: None,
+            last_irreversible_ply: self.last_irreversible_ply
         };
         self.hash ^= ZobristHasher::en_passant_hash(self.ep_target);
         self.ep_target = None;
@@ -188,7 +189,6 @@ impl Board {
         } else {
             return;
         };
-        self.repeatable.pop();
 
         let move_played = unretrievable_info.move_played;
         if move_played == Move::NULL_MOVE {
@@ -207,6 +207,7 @@ impl Board {
         self.ply -= 1;
         self.side_to_move = self.side_to_move.opposite();
         self.hash ^= ZobristHasher::ZOBRIST_KEYS[ZobristHasher::BLACK_TO_MOVE_INDEX];
+        self.last_irreversible_ply = unretrievable_info.last_irreversible_ply;
 
         if let Some(moved) = self.remove_piece(move_played.target()) {
             self.add_piece(moved, move_played.origin())
@@ -355,7 +356,10 @@ impl Board {
     }
 
     pub fn repetitions(&self, hash: Hash) -> usize {
-        self.repeatable.iter().filter(|h| hash == **h).count()
+        self.history_entries
+            .iter()
+            .filter(|h| h.hash == hash)
+            .count()
     }
 
     pub fn is_drawn(&self) -> bool {
@@ -367,16 +371,16 @@ impl Board {
         let occupancy = self.get_occupancy_bitboard() & !xray;
 
         Bitboard::pawn_attacks(self.bitboards[attacking_color as usize][0], attacking_color)
-        | Bitboard::knight_attacks_setwise(self.bitboards[attacking_color as usize][1])
-        | Bitboard::KING_ATTACKS[self.king_square(attacking_color).unwrap()]
-        | Bitboard::bishop_attacks_setwise(
-            self.get_diagonal_sliders_bitboard(attacking_color),
-            !occupancy,
-        )
-        | Bitboard::rook_attacks_setwise(
-            self.get_cardinal_sliders_bitboard(attacking_color),
-            !occupancy,
-        )
+            | Bitboard::knight_attacks_setwise(self.bitboards[attacking_color as usize][1])
+            | Bitboard::KING_ATTACKS[self.king_square(attacking_color).unwrap()]
+            | Bitboard::bishop_attacks_setwise(
+                self.get_diagonal_sliders_bitboard(attacking_color),
+                !occupancy,
+            )
+            | Bitboard::rook_attacks_setwise(
+                self.get_cardinal_sliders_bitboard(attacking_color),
+                !occupancy,
+            )
     }
 
     /// Returns a bitboard with attackers of a square

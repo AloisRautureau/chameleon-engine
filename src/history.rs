@@ -4,7 +4,7 @@ use crate::r#move::Move;
 use crate::square::Square;
 use crate::zob_hash::Hash;
 
-#[derive(Debug, Copy, Clone, PartialOrd, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub struct HistoryEntry {
     pub hash: Hash,
     pub move_played: Move,

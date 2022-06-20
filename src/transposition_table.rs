@@ -1,7 +1,7 @@
 use crate::{evaluation::Score, r#move::Move, zob_hash::Hash};
 use std::sync::{Mutex, Arc};
 
-#[derive(PartialEq, Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub enum SearchInfo {
     Exact { 
         position_hash: Hash, 
@@ -17,7 +17,7 @@ pub enum SearchInfo {
     },
     All { 
         position_hash: Hash, 
-        best_move: Move, 
+        best_move: Move,
         depth_searched: u8, 
         low_bound: Score 
     },
@@ -38,7 +38,7 @@ impl SearchInfo {
             Self::Exact { best_move: m, .. } => Some(*m),
             Self::Cutoff { refutation_move: m, .. } => Some(*m),
             Self::All { best_move: m, .. } => Some(*m),
-            Self::None => None
+            _ => None
         }
     }
 
@@ -121,11 +121,11 @@ impl TranspositionTable {
         }
     }
 
+    // Prioritize:
+    // - Exact > Cutoff > All
+    // - depth otherwise
     fn should_replace(old_info: &SearchInfo, new_info: &SearchInfo) -> bool {
-        match old_info {
-            SearchInfo::None => true,
-            i => i.depth_searched() <= new_info.depth_searched()
-        }
+        old_info.depth_searched() <= new_info.depth_searched()
     }
 }
 impl Default for TranspositionTable {

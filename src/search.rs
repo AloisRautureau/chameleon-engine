@@ -145,7 +145,7 @@ struct SearchContext<'a> {
     pub should_stop: &'a (dyn Fn() -> bool),
 }
 impl Search {
-    const INFINITY: Score = 32767;
+    const INFINITY: Score = i32::MAX;
     const MAX_DEPTH: i8 = 32;
     const BASE_WINDOW: Score = Evaluation::MIDGAME_PIECE_TYPE_VALUE[0] / 4; // uses 1/4 of a pawn as the aspiration window
 
@@ -393,13 +393,13 @@ impl Search {
 
         // Check what the eventual TT hit gives us
         let tt_info = context.transposition_table.get(position.get_hash());
-        let (mut best_move, mut best_score) = {
+        let mut best_move = {
             // The table has information about a deeper search that we can use
             // as is
             if tt_info.depth_searched() >= Some(depth as u8) {
                 return tt_info.bound().unwrap()
             } else {
-                (tt_info.hash_move(), tt_info.bound().unwrap_or(-Evaluation::MATE_SCORE))
+                tt_info.hash_move()
             }
         };
 
@@ -415,6 +415,7 @@ impl Search {
 
         // PV search
         let mut search_pv = true;
+        let mut best_score = -Evaluation::MATE_SCORE - 1;
         for (mv_index, mv) in moves_iter.enumerate() {
             position.make(*mv);
             let mut score;
@@ -476,40 +477,38 @@ impl Search {
                 }
                 return beta;
             }
-            if score > alpha {
-                search_pv = false;
-                alpha = score;
-            }
             if score > best_score {
                 best_score = score;
                 best_move = Some(*mv);
+                if score > alpha {
+                    context.transposition_table.set(
+                        position.get_hash(),
+                        SearchInfo::Exact {
+                            position_hash: position.get_hash(),
+                            best_move: *mv,
+                            depth_searched: depth as u8,
+                            score,
+                        }
+                    );
+                    search_pv = false;
+                    alpha = score;
+                }
             }
         }
-
-        if best_move.is_none() { return alpha }
-        if best_score == alpha {
-            context.transposition_table.set(
-                position.get_hash(),
-                SearchInfo::Exact {
-                    position_hash: position.get_hash(),
-                    best_move: best_move.unwrap(),
-                    depth_searched: depth as u8,
-                    score: alpha,
-                }
-            )
-        } else {
+        // We never reached alpha
+        if search_pv { 
             context.transposition_table.set(
                 position.get_hash(),
                 SearchInfo::All {
-                    position_hash: position.get_hash(),
                     best_move: best_move.unwrap(),
+                    position_hash: position.get_hash(),
                     depth_searched: depth as u8,
-                    low_bound: alpha,
+                    low_bound: best_score,
                 }
             )
         }
 
-        alpha
+        best_score
     }
 
     /// A special search that tries to find a quiet position in order to reduce the
@@ -597,7 +596,7 @@ impl Search {
 
     fn collect_pv(board: &mut Board, context: &SearchContext) -> Vec<Move> {
         let mut pv = Vec::with_capacity(context.total_depth as usize);
-        while let Some(m) = context.transposition_table.get(board.get_hash()).hash_move() {
+        while let SearchInfo::Exact { best_move: m, .. } = context.transposition_table.get(board.get_hash()) {
             board.make(m);
             pv.push(m);
         }

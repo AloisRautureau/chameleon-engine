@@ -84,11 +84,7 @@ impl UCI {
             }
             "ponderhit" => (),
             "probetable" => {
-                if let Some(info) = self.search_framework.probe_table(&self.board) {
-                    println!("{}", info)
-                } else {
-                    println!("no info")
-                }
+                println!("{:?}", self.search_framework.probe_table(&self.board))
             }
             "show" => println!("{}", self.board),
             "quit" => return Ok(UCIOkCode::ShouldQuit),
@@ -169,7 +165,7 @@ impl UCI {
                 .map(|d| d.parse::<u32>().unwrap()),
             arg_value_map
                 .get("depth")
-                .map(|d| d.parse::<i32>().unwrap()),
+                .map(|d| d.parse::<i8>().unwrap()),
             arg_value_map
                 .get("nodes")
                 .map(|d| d.parse::<u128>().unwrap()),

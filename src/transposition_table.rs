@@ -2,48 +2,84 @@ use crate::{evaluation::Score, r#move::Move, zob_hash::Hash};
 use std::sync::{Mutex, Arc};
 
 #[derive(PartialEq, Debug, Clone, Copy)]
-pub enum NodeType {
-    Exact,
-    Cutoff,
-    All
+pub enum SearchInfo {
+    Exact { 
+        position_hash: Hash, 
+        best_move: Move, 
+        depth_searched: u8, 
+        score: Score 
+    },
+    Cutoff { 
+        position_hash: Hash, 
+        refutation_move: Move, 
+        depth_searched: u8, 
+        high_bound: Score 
+    },
+    All { 
+        position_hash: Hash, 
+        best_move: Move, 
+        depth_searched: u8, 
+        low_bound: Score 
+    },
+    None
 }
-#[derive(Clone, Copy)]
-pub struct SearchInfo {
-    pub position_hash: Hash,
-    pub best_move: Option<Move>,
-    pub depth_searched: i32,
-    pub score: Score,
-    pub node_type: NodeType,
-}
-impl std::fmt::Display for SearchInfo {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        write!(
-            f,
-            "hash {:#0x}:\nbest {}, depth {}, score {} ({:#?} node)",
-            self.position_hash,
-            self.best_move.unwrap_or(Move::NULL_MOVE),
-            self.depth_searched,
-            self.score,
-            self.node_type
-        )
+impl SearchInfo {
+    pub fn position_hash(&self) -> Option<Hash> {
+        match self {
+            Self::Exact { position_hash: h, .. } => Some(*h),
+            Self::Cutoff { position_hash: h, .. } => Some(*h),
+            Self::All { position_hash: h, .. } => Some(*h),
+            Self::None => None
+        }
     }
+
+    pub fn hash_move(&self) -> Option<Move> {
+        match self {
+            Self::Exact { best_move: m, .. } => Some(*m),
+            Self::Cutoff { refutation_move: m, .. } => Some(*m),
+            Self::All { best_move: m, .. } => Some(*m),
+            Self::None => None
+        }
+    }
+
+    pub fn depth_searched(&self) -> Option<u8> {
+        match self {
+            Self::Exact { depth_searched: d, .. } => Some(*d),
+            Self::Cutoff { depth_searched: d, .. } => Some(*d),
+            Self::All { depth_searched: d, .. } => Some(*d),
+            Self::None => None
+        }
+    }
+
+    pub fn bound(&self) -> Option<Score> {
+        match self {
+            Self::Exact { score: b, .. } => Some(*b),
+            Self::Cutoff { high_bound: b, .. } => Some(*b),
+            Self::All { low_bound: b, .. } => Some(*b),
+            Self::None => None
+        }
+    }
+
+}
+impl Default for SearchInfo {
+    fn default() -> Self { SearchInfo::None }
 }
 
 // A shareable, thread safe, but lockless hashtable.
 // Instead, the locks are held by the entries
-pub struct HashTable<T: Copy + Sync>(Vec<Arc<Mutex<Option<T>>>>);
-impl<T: Copy + Sync> HashTable<T> {
+pub struct HashTable<T: Copy + Sync>(Vec<Arc<Mutex<T>>>);
+impl<T: Copy + Sync + Default> HashTable<T> {
     // Creating a hashtable already fills every single entry
     pub fn new(size: usize) -> Self {
         let mut table = Vec::with_capacity(size);
         for _ in 0..size {
-            table.push(Arc::new(Mutex::new(None)))
+            table.push(Arc::new(Mutex::new(Default::default())))
         }
         HashTable(table)
     }
 
     /// Returns an atomic reference to the entry (avoids locking the entire table)
-    pub fn get(&self, hash: Hash) -> Arc<Mutex<Option<T>>> {
+    pub fn get(&self, hash: Hash) -> Arc<Mutex<T>> {
         let key = self.key_from_hash(&hash);
         self.0[key].clone()
     }
@@ -53,58 +89,43 @@ impl<T: Copy + Sync> HashTable<T> {
     }
 }
 
-pub struct TranspositionTable(HashTable<(SearchInfo, Option<SearchInfo>)>);
+pub struct TranspositionTable(HashTable<(SearchInfo, SearchInfo)>);
 impl TranspositionTable {
     pub fn new() -> Self {
         TranspositionTable(HashTable::new(2_usize.pow(20) - 1))
     }
 
-    pub fn get(&self, hash: Hash) -> Option<SearchInfo> {
+    pub fn get(&self, hash: Hash) -> SearchInfo {
         let ptr = self.0.get(hash);
         let lock = ptr.lock().unwrap();
-        let entry = *lock;
+        let (depth_entry, young_entry) = *lock;
 
-        let (depth_entry, young_entry) = entry?;
-
-        if depth_entry.position_hash == hash {
-            return Some(depth_entry);
-        } else if let Some(e) = young_entry {
-            if e.position_hash == hash {
-                return young_entry;
-            }
+        if depth_entry.position_hash() == Some(hash) {
+            depth_entry
+        } else if young_entry.position_hash() == Some(hash) {
+            young_entry
+        } else {
+            SearchInfo::None
         }
-        None
     }
 
     pub fn set(&self, hash: Hash, entry: SearchInfo) {
         let ptr = self.0.get(hash);
         let mut lock = ptr.lock().unwrap();
-        let entries = &mut *lock;
-
-        let (depth_entry, young_entry) = if let Some(e) = entries {
-            e
-        } else {
-            *entries = Some((entry, None));
-            return;
-        };
+        let (depth_entry, young_entry) = &mut *lock;
 
         if Self::should_replace(depth_entry, &entry) {
             *depth_entry = entry;
         } else {
-            *young_entry = Some(entry);
-        }
-    }
-
-    pub fn get_hash_move(&self, hash: Hash) -> Option<Move> {
-        if let Some(info) = self.get(hash)  {
-            info.best_move
-        } else {
-            None
+            *young_entry = entry;
         }
     }
 
     fn should_replace(old_info: &SearchInfo, new_info: &SearchInfo) -> bool {
-        old_info.depth_searched <= new_info.depth_searched
+        match old_info {
+            SearchInfo::None => true,
+            i => i.depth_searched() <= new_info.depth_searched()
+        }
     }
 }
 impl Default for TranspositionTable {

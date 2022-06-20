@@ -24,12 +24,12 @@ pub struct Evaluation {
     pub full_eval: bool,
 }
 impl Evaluation {
-    pub const MIDGAME_PIECE_TYPE_VALUE: [Score; 6] = [100, 300, 350, 500, 900, 99999];
-    pub const ENDGAME_PIECE_TYPE_VALUE: [Score; 6] = [120, 250, 300, 550, 850, 99999];
-    pub const MATE_SCORE: Score = i16::MAX as i32;
+    pub const MIDGAME_PIECE_TYPE_VALUE: [Score; 6] = [100, 300, 350, 500, 900, Self::MATE_SCORE];
+    pub const ENDGAME_PIECE_TYPE_VALUE: [Score; 6] = [120, 250, 300, 550, 850, Self::MATE_SCORE];
+    pub const MATE_SCORE: Score = 32766 / 2;
     pub const DRAW_SCORE: Score = 0;
-    pub const PHASE_VALUE: [i32; 6] = [0, 1, 1, 2, 4, 0];
-    pub const MAX_PHASE: i32 = 24;
+    pub const PHASE_VALUE: [Score; 6] = [0, 1, 1, 2, 4, 0];
+    pub const MAX_PHASE: Score = 24;
 
     /// Performs a simple, but quick evaluation of a position
     pub fn shallow_eval(board: &Board) -> Evaluation {
@@ -42,13 +42,13 @@ impl Evaluation {
             };
         }
 
-        let mut phase = Self::MAX_PHASE;
+        let mut phase = 0;
         let mut mg_scores = [0, 0];
         let mut eg_scores = [0, 0];
 
         for (piece, bb) in board.material_iter(Color::White).enumerate() {
             for sq in *bb {
-                phase -= Self::PHASE_VALUE[piece];
+                phase += Self::PHASE_VALUE[piece];
                 mg_scores[Color::White as usize] +=
                     Self::MIDGAME_PIECE_TYPE_VALUE[piece] + MIDGAME_PIECE_SQUARE_TABLE[piece][sq];
                 eg_scores[Color::White as usize] +=
@@ -57,7 +57,7 @@ impl Evaluation {
         }
         for (piece, bb) in board.material_iter(Color::Black).enumerate() {
             for sq in bb.vertical_flip() {
-                phase -= Self::PHASE_VALUE[piece];
+                phase += Self::PHASE_VALUE[piece];
                 mg_scores[Color::Black as usize] +=
                     Self::MIDGAME_PIECE_TYPE_VALUE[piece] + MIDGAME_PIECE_SQUARE_TABLE[piece][sq];
                 eg_scores[Color::Black as usize] +=
@@ -67,18 +67,19 @@ impl Evaluation {
 
         let game_phase = if phase >= 20 {
             GamePhase::Opening
-        } else if phase >= 10 {
+        } else if phase >= 4 {
             GamePhase::MiddleGame
         } else {
-            GamePhase::EndGame
+            GamePhase::Opening
         };
-        phase = (phase * 256 + (Self::MAX_PHASE / 2)) / Self::MAX_PHASE;
+        phase = std::cmp::min(phase, Self::MAX_PHASE);
         let us_index = board.side_to_move() as usize;
         let mg_score = mg_scores[us_index] - mg_scores[us_index ^ 1];
         let eg_score = eg_scores[us_index] - eg_scores[us_index ^ 1];
+        //println!("phase value {}, mg {}, eg {}", phase, mg_score, eg_score);
 
         Evaluation {
-            score: ((mg_score * (256 - phase)) + (eg_score * phase)) / 256,
+            score: ((mg_score * phase) + (eg_score * (Self::MAX_PHASE - phase))) / Self::MAX_PHASE,
             game_phase,
             is_drawn: false,
             full_eval: false,
@@ -112,31 +113,31 @@ impl Evaluation {
         // Rook on open/semi-open file
         scores[Color::White as usize] += (board.get_piece_bitboard(PieceType::Rook, Color::White)
             & open_files)
-            .pop_count() as i32
+            .pop_count() as Score
             * 20
             + (board.get_piece_bitboard(PieceType::Rook, Color::White)
                 & semi_open_files[Color::White as usize])
-                .pop_count() as i32
+                .pop_count() as Score
                 * 10;
         scores[Color::Black as usize] += (board.get_piece_bitboard(PieceType::Rook, Color::Black)
             & open_files)
-            .pop_count() as i32
+            .pop_count() as Score
             * 20
             + (board.get_piece_bitboard(PieceType::Rook, Color::Black)
                 & semi_open_files[Color::Black as usize])
-                .pop_count() as i32
+                .pop_count() as Score
                 * 10;
 
         // Bishop pair bonus
         scores[Color::White as usize] += (board
             .get_piece_bitboard(PieceType::Bishop, Color::White)
-            .pop_count() as i32
+            .pop_count() as Score
             % 2
             + 1)
             * 30;
         scores[Color::Black as usize] += (board
             .get_piece_bitboard(PieceType::Bishop, Color::Black)
-            .pop_count() as i32
+            .pop_count() as Score
             % 2
             + 1)
             * 30;
@@ -160,9 +161,9 @@ impl Evaluation {
             b_safe_squares & Bitboard::LARGE_CENTER,
         );
         scores[Color::White as usize] +=
-            w_center_control.pop_count() as i32 * 5 + w_large_center_control.pop_count() as i32 * 2;
+            w_center_control.pop_count() as Score * 5 + w_large_center_control.pop_count() as Score * 2;
         scores[Color::Black as usize] +=
-            b_center_control.pop_count() as i32 * 5 + b_large_center_control.pop_count() as i32 * 2;
+            b_center_control.pop_count() as Score * 5 + b_large_center_control.pop_count() as Score * 2;
 
         self.score += scores[board.side_to_move() as usize]
             - scores[board.side_to_move().opposite() as usize];

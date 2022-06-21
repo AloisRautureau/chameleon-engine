@@ -24,8 +24,10 @@ pub struct Evaluation {
     pub full_eval: bool,
 }
 impl Evaluation {
-    pub const MIDGAME_PIECE_TYPE_VALUE: [Score; 6] = [100, 300, 350, 500, 900, Self::MATE_SCORE - 1];
-    pub const ENDGAME_PIECE_TYPE_VALUE: [Score; 6] = [120, 250, 300, 550, 850, Self::MATE_SCORE - 1];
+    pub const MIDGAME_PIECE_TYPE_VALUE: [Score; 6] =
+        [100, 300, 350, 500, 900, Self::MATE_SCORE - 1];
+    pub const ENDGAME_PIECE_TYPE_VALUE: [Score; 6] =
+        [120, 250, 300, 550, 850, Self::MATE_SCORE - 1];
     pub const MATE_SCORE: Score = i32::MAX / 2;
     pub const DRAW_SCORE: Score = 0;
     pub const PHASE_VALUE: [Score; 6] = [0, 1, 1, 2, 4, 0];
@@ -160,10 +162,10 @@ impl Evaluation {
             w_safe_squares & Bitboard::LARGE_CENTER,
             b_safe_squares & Bitboard::LARGE_CENTER,
         );
-        scores[Color::White as usize] +=
-            w_center_control.pop_count() as Score * 5 + w_large_center_control.pop_count() as Score * 2;
-        scores[Color::Black as usize] +=
-            b_center_control.pop_count() as Score * 5 + b_large_center_control.pop_count() as Score * 2;
+        scores[Color::White as usize] += w_center_control.pop_count() as Score * 5
+            + w_large_center_control.pop_count() as Score * 2;
+        scores[Color::Black as usize] += b_center_control.pop_count() as Score * 5
+            + b_large_center_control.pop_count() as Score * 2;
 
         self.score += scores[board.side_to_move() as usize]
             - scores[board.side_to_move().opposite() as usize];

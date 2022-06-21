@@ -8,7 +8,7 @@ use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, N
 include!(concat!(env!("OUT_DIR"), "/lookup.rs"));
 
 #[repr(transparent)]
-#[derive(Debug, Copy, Clone, PartialOrd, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialOrd, PartialEq, Eq)]
 pub struct Bitboard(pub u64);
 
 impl Bitboard {
@@ -102,7 +102,7 @@ impl Bitboard {
 
     #[inline(always)]
     pub fn more_than_one_set(&self) -> bool {
-        self.0 & self.0 - 1 != 0
+        self.0 & (self.0 - 1) != 0
     }
 
     /*
@@ -145,8 +145,8 @@ impl Bitboard {
     /// ```
     /// use chameleon::bitboard::Bitboard;
     /// let bb = Bitboard::from_square(8);
-    /// assert_eq!(bb << 9, Bitboard::generalized_shift(bb, 9));
-    /// assert_eq!(bb >> 9, Bitboard::generalized_shift(bb, -9));
+    /// assert_eq!(bb << 9, Bitboard::generalized_shift(&bb, 9));
+    /// assert_eq!(bb >> 9, Bitboard::generalized_shift(&bb, -9));
     /// ```
     #[inline]
     pub fn generalized_shift(bb: &Bitboard, shift: isize) -> Bitboard {
@@ -509,7 +509,7 @@ impl Shl<usize> for Bitboard {
 impl Shr for Bitboard {
     type Output = Bitboard;
     fn shr(self, rhs: Self) -> Self::Output {
-        Bitboard(self.0 << rhs.0)
+        Bitboard(self.0 >> rhs.0)
     }
 }
 impl Shr<usize> for Bitboard {

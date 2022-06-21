@@ -67,7 +67,7 @@ impl Board {
             ep_target: self.ep_target,
             castling_rights: self.castling_rights,
             reversible_moves: self.reversible_moves,
-            last_irreversible_ply: self.last_irreversible_ply
+            last_irreversible_ply: self.last_irreversible_ply,
         };
 
         self.hash ^= ZobristHasher::castling_rights_hash(self.castling_rights);
@@ -171,7 +171,7 @@ impl Board {
             castling_rights: self.castling_rights,
             reversible_moves: self.reversible_moves,
             captured_piece: None,
-            last_irreversible_ply: self.last_irreversible_ply
+            last_irreversible_ply: self.last_irreversible_ply,
         };
         self.hash ^= ZobristHasher::en_passant_hash(self.ep_target);
         self.ep_target = None;
@@ -457,8 +457,8 @@ impl Board {
         let fullmove = get(sections.next());
 
         self.side_to_move = if side == "w" { White } else { Black };
-        self.reversible_moves = halfmove.parse::<u32>().unwrap();
-        self.ply = fullmove.parse::<u32>().unwrap();
+        self.reversible_moves = halfmove.parse::<u32>().unwrap_or(0);
+        self.ply = fullmove.parse::<u32>().unwrap_or(1);
         self.castling_rights = CastlingRights::from_str(&castling);
         self.ep_target = parse_square(&ep_target);
 
@@ -466,7 +466,7 @@ impl Board {
         for c in piece_placement.chars() {
             if c == '/' {
                 current_square -= 16
-            } else if c.is_digit(10) {
+            } else if c.is_ascii_digit() {
                 current_square += c.to_digit(10).unwrap() as usize
             } else {
                 self.add_piece(Piece::from_char(c).unwrap(), current_square);
@@ -507,6 +507,10 @@ impl Board {
                 fen.push('/');
                 current_square -= 16;
             }
+        }
+        if empty_counter != 0 {
+            fen.push_str(&empty_counter.to_string());
+            fen.push(' ');
         }
 
         fen.push_str(&self.side_to_move.to_string());

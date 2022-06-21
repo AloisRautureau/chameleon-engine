@@ -11,8 +11,6 @@ fn main() {
     let zobrist_file = Path::new(&out_dir).join("zobrist_keys.rs");
     let mut file = File::create(generation_file).unwrap();
 
-    println!("aled");
-
     let processed_consts = BuildPreprocessor::process();
     println!("finished processing");
     writeln!(&mut file, "impl Bitboard {{").unwrap();
@@ -723,7 +721,12 @@ impl BuildPreprocessor {
     }
 
     pub fn initialize_zobrist_keys() -> [u64; 781] {
-        let mut rng = Mt64::new_unseeded();
+        let mut rng = Mt64::new(
+            std::time::SystemTime::now()
+                .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                .expect("Failed to get a duration since epoch")
+                .as_secs(),
+        );
         [0u64; 781].map(|_| rng.next_u64())
     }
 }

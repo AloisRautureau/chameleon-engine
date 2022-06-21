@@ -30,7 +30,9 @@ impl MoveList {
         }
     }
     pub fn swap_pop(&mut self, i: usize) -> Option<Move> {
-        if i >= self.len() { return None }
+        if i >= self.len() {
+            return None;
+        }
         self.1 -= 1;
         self.0.swap(i, self.1);
         Some(self.0[self.1])
@@ -58,11 +60,10 @@ impl From<Vec<Move>> for MoveList {
 }
 impl std::fmt::Display for MoveList {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        let mut s = String::new();
         for m in self.0.iter() {
-            s.push_str(&format!("{} ", m))
+            write!(f, "{} ", m)?
         }
-        write!(f, "{}", s.trim())
+        write!(f, "")
     }
 }
 impl<'a> IntoIterator for &'a MoveList {
@@ -104,7 +105,7 @@ impl<'a> Iterator for MoveListIter<'a> {
 pub struct ScoredMoveListIter<'a> {
     moves: [&'a Move; MAX_MOVELIST_CAPACITY],
     scores: [Score; MAX_MOVELIST_CAPACITY],
-    len: usize
+    len: usize,
 }
 impl<'a> ScoredMoveListIter<'a> {
     pub fn new<F: Fn(&Move) -> Score>(move_list: &'a MoveList, scoring_function: &F) -> Self {
@@ -114,10 +115,10 @@ impl<'a> ScoredMoveListIter<'a> {
             moves[i] = m;
             scores[i] = scoring_function(m);
         }
-        ScoredMoveListIter { 
-            moves, 
+        ScoredMoveListIter {
+            moves,
             scores,
-            len: move_list.len()
+            len: move_list.len(),
         }
     }
 }

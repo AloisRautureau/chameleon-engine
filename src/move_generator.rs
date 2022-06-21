@@ -6,7 +6,7 @@ use crate::{
     r#move::Move,
 };
 
-#[derive(Debug, Copy, Clone, PartialOrd, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialOrd, PartialEq, Eq)]
 pub enum GenType {
     Legal,
     Captures,
@@ -141,7 +141,7 @@ pub fn generate(board: &Board, gen_type: GenType) -> MoveList {
     // PAWNS
     let mut pawns = board.get_piece_bitboard(PieceType::Pawn, us) & !pinned_mask;
     let promoting_pawns = pawns & pre_promo_rank;
-    pawns = pawns ^ promoting_pawns;
+    pawns ^= promoting_pawns;
     let single_push = Bitboard::generalized_shift(&pawns, 8 * shift_mult) & !occupancy;
     for target in single_push & push_mask {
         move_list.push(Move::new_quiet(target + 8 - 16 * us_index, target))
@@ -189,13 +189,13 @@ pub fn generate(board: &Board, gen_type: GenType) -> MoveList {
 
         // In rare cases, taking en passant might leave the king open to a check
         let discovered_rank = Bitboard::RANKS[crate::square::rank_of(captured_bb.ls1b().unwrap())];
-        if !origin_bb.is_empty()
-            && !((ep_bb & push_mask).is_empty() && (captured_bb & capture_mask).is_empty())
-            && (origin_bb.more_than_one_set()
-                || (board.attackers_of_square(king_sq, them, origin_bb | captured_bb)
-                    & discovered_rank)
-                    .is_empty())
-        {
+        let pinned_ep = !origin_bb.more_than_one_set()
+            && discovered_rank.is_set(king_sq)
+            && !board
+                .attackers_of_square(king_sq, them, origin_bb | captured_bb)
+                .is_empty();
+        let in_capture_push_mask = !((ep_bb & push_mask) | (captured_bb & capture_mask)).is_empty();
+        if !origin_bb.is_empty() && in_capture_push_mask && !pinned_ep {
             for origin in origin_bb {
                 move_list.push(Move::new_en_passant(origin, ep_sq))
             }

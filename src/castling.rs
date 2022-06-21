@@ -2,7 +2,7 @@ use crate::piece::Color;
 use crate::piece::Color::{Black, White};
 use std::fmt::{Display, Formatter};
 
-#[derive(Debug, Copy, Clone, PartialOrd, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialOrd, PartialEq, Eq)]
 pub struct CastlingRights(u8);
 
 impl CastlingRights {
@@ -60,14 +60,18 @@ impl Display for CastlingRights {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let (wking, wqueen) = self.get(White);
         let (bking, bqueen) = self.get(Black);
-        write!(
-            f,
-            "{}{}{}{}",
-            if wking { "K" } else { "" },
-            if wqueen { "Q" } else { "" },
-            if bking { "k" } else { "" },
-            if bqueen { "q" } else { "" }
-        )
+        if !wking && !wqueen && !bking && !bqueen {
+            write!(f, "-")
+        } else {
+            write!(
+                f,
+                "{}{}{}{}",
+                if wking { "K" } else { "" },
+                if wqueen { "Q" } else { "" },
+                if bking { "k" } else { "" },
+                if bqueen { "q" } else { "" }
+            )
+        }
     }
 }
 

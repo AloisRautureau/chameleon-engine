@@ -79,6 +79,7 @@ impl UCI {
                 .run_search(&self.board, &self.parse_go_args(args.map(String::from))),
             "stop" => {
                 if let Some(result) = self.search_framework.stop_search() {
+                    UCI::send(UCICommand::Info(&result));
                     UCI::send(UCICommand::BestMove(result.best_move.unwrap()))
                 }
             }
@@ -96,11 +97,11 @@ impl UCI {
 
     pub fn send(command: UCICommand) {
         match command {
-            UCICommand::Id => println!("id name Chameleon\nid author Aloïs.R"),
+            UCICommand::Id => println!("id name Chameleon\nid author A.Rautureau"),
             UCICommand::UciOk => println!("uciok"),
             UCICommand::ReadyOk => println!("readyok"),
             UCICommand::BestMove(mv) => println!("bestmove {}", mv),
-            UCICommand::Info(search_state) => println!("info {}", search_state),
+            UCICommand::Info(search_state) => println!("info {}", search_state,),
         }
     }
 
@@ -163,9 +164,7 @@ impl UCI {
             arg_value_map
                 .get("movestogo")
                 .map(|d| d.parse::<u32>().unwrap()),
-            arg_value_map
-                .get("depth")
-                .map(|d| d.parse::<i8>().unwrap()),
+            arg_value_map.get("depth").map(|d| d.parse::<i8>().unwrap()),
             arg_value_map
                 .get("nodes")
                 .map(|d| d.parse::<u128>().unwrap()),

@@ -2,12 +2,12 @@ use crate::piece::Color::Black;
 use crate::piece::PieceType::{Bishop, King, Knight, Pawn, Queen, Rook};
 use std::fmt::{Display, Formatter};
 
-#[derive(Debug, Copy, Clone, PartialOrd, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialOrd, PartialEq, Eq)]
 pub struct Piece {
     pub piece_type: PieceType,
     pub color: Color,
 }
-#[derive(Debug, Copy, Clone, PartialOrd, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialOrd, PartialEq, Eq)]
 pub enum PieceType {
     Pawn,
     Knight,
@@ -54,7 +54,7 @@ impl Display for PieceType {
         )
     }
 }
-#[derive(Debug, Copy, Clone, PartialOrd, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialOrd, PartialEq, Eq)]
 pub enum Color {
     Black,
     White,

@@ -7,8 +7,8 @@ use std::fmt::{Display, Formatter};
 /// - 6*2 bits for origin and destination square
 /// - 4 bits used for various flags
 #[repr(transparent)]
-#[derive(Debug, Copy, Clone, PartialEq)]
-pub struct Move(u16);
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct Move(pub u16);
 
 impl Move {
     fn new(origin: u16, target: u16, flags: u16) -> Move {

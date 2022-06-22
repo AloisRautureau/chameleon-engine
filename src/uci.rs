@@ -1,4 +1,5 @@
 use crate::board::Board;
+use crate::move_generator::{generate, GenType};
 use crate::piece::Color;
 use crate::r#move::Move;
 use crate::search::{Search, SearchFramework, SearchOptions};
@@ -189,6 +190,25 @@ impl UCI {
             if let Some(c) = clock {
                 options.set_time_from_clock(c, increment);
             }
+        }
+
+        if let Some(move_list) = arg_value_map.get("searchmoves") {
+            let legal_moves = generate(&self.board, GenType::Legal);
+            let mut moves_to_search = vec![];
+            for move_str in move_list.split(' ') {
+                let (origin, target, maybe_prom) = match Move::parse(move_str) {
+                    Some(r) => r,
+                    None => continue,
+                };
+                if let Some(m) = legal_moves.iter().find(|m| {
+                    m.origin() == origin
+                        && m.target() == target
+                        && m.promotion_target() == maybe_prom
+                }) {
+                    moves_to_search.push(*m)
+                }
+            }
+            options.set_moves_to_search(Some(moves_to_search));
         }
 
         options

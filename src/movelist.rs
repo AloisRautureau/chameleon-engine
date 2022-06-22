@@ -19,18 +19,18 @@ impl MoveList {
         self.1
     }
     pub fn push(&mut self, m: Move) {
-        self.0[self.len()] = m;
+        self.0[self.1] = m;
         self.1 += 1;
     }
     pub fn get(&self, i: usize) -> Option<&Move> {
-        if i < self.len() {
+        if i < self.1 {
             Some(&self.0[i])
         } else {
             None
         }
     }
     pub fn swap_pop(&mut self, i: usize) -> Option<Move> {
-        if i >= self.len() {
+        if i >= self.1 {
             return None;
         }
         self.1 -= 1;

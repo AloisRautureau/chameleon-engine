@@ -4,6 +4,7 @@ use crate::r#move::Move;
 use crate::search::{Search, SearchFramework, SearchOptions};
 
 use regex::Regex;
+use rustyline::config::Configurer;
 use rustyline::Editor;
 use std::collections::HashMap;
 use std::time::Duration;
@@ -11,17 +12,27 @@ use std::time::Duration;
 pub struct UCI {
     board: Board,
     search_framework: SearchFramework,
+    editor: Editor<()>,
     debug_mode: bool,
+}
+impl Default for UCI {
+    fn default() -> Self {
+        let mut editor = Editor::<()>::new();
+        editor.set_auto_add_history(true);
+        editor.set_check_cursor_position(true);
+        UCI {
+            board: Board::new("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"),
+            search_framework: SearchFramework::new(),
+            editor,
+            debug_mode: false,
+        }
+    }
 }
 
 impl UCI {
-    pub fn run() {
-        let mut instance = UCI::new_instance();
-        let mut rl = Editor::<()>::new();
-
-        while let Ok(line) = rl.readline("uci> ") {
-            rl.add_history_entry(line.as_str());
-            match instance.handle_command(&line) {
+    pub fn run(&mut self) {
+        while let Ok(line) = self.editor.readline("uci> ") {
+            match self.handle_command(&line) {
                 Ok(UCIOkCode::ShouldQuit) => break,
                 Err(UCIErrCode::BadCommand(cmd)) => {
                     eprintln!("Unknown or badly formed UCI command: {}", cmd)
@@ -80,10 +91,11 @@ impl UCI {
             "stop" => {
                 if let Some(result) = self.search_framework.stop_search() {
                     UCI::send(UCICommand::Info(&result));
-                    UCI::send(UCICommand::BestMove(result.best_move.unwrap()))
+                    UCI::send(UCICommand::BestMove(&result.best_move.unwrap()))
                 }
             }
             "ponderhit" => (),
+            // Commands that are not part of the UCI protocol
             "probetable" => {
                 println!("{:?}", self.search_framework.probe_table(&self.board))
             }
@@ -136,50 +148,53 @@ impl UCI {
         }
         arg_value_map.insert(current_arg, String::from(current_value.trim()));
 
-        let (clock, increment) = if self.board.side_to_move() == Color::White {
-            (
+        let mut options = SearchOptions::default();
+        options
+            .set_infinite(arg_value_map.contains_key("infinite"))
+            .set_moves_until_time_control(
                 arg_value_map
-                    .get("wtime")
-                    .map(|d| Duration::from_millis(d.parse::<u64>().unwrap())),
-                arg_value_map
-                    .get("winc")
-                    .map(|d| Duration::from_millis(d.parse::<u64>().unwrap())),
+                    .get("movestogo")
+                    .map(|d| d.parse::<u32>().unwrap()),
             )
+            .set_nodes_to_search(
+                arg_value_map
+                    .get("nodes")
+                    .map(|d| d.parse::<u128>().unwrap()),
+            )
+            .set_depth(arg_value_map.get("depth").map(|d| d.parse::<i8>().unwrap()));
+
+        if arg_value_map.contains_key("movetime") {
+            options.set_time(
+                arg_value_map
+                    .get("movetime")
+                    .map(|d| Duration::from_millis(d.parse::<u64>().unwrap())),
+            );
         } else {
-            (
-                arg_value_map
-                    .get("btime")
-                    .map(|d| Duration::from_millis(d.parse::<u64>().unwrap())),
-                arg_value_map
-                    .get("binc")
-                    .map(|d| Duration::from_millis(d.parse::<u64>().unwrap())),
-            )
-        };
-
-        SearchOptions::from_info(
-            arg_value_map.contains_key("infinite"),
-            None, // TODO parse this
-            clock,
-            increment,
-            arg_value_map
-                .get("movestogo")
-                .map(|d| d.parse::<u32>().unwrap()),
-            arg_value_map.get("depth").map(|d| d.parse::<i8>().unwrap()),
-            arg_value_map
-                .get("nodes")
-                .map(|d| d.parse::<u128>().unwrap()),
-            arg_value_map
-                .get("movetime")
-                .map(|d| Duration::from_millis(d.parse::<u64>().unwrap())),
-        )
-    }
-
-    fn new_instance() -> UCI {
-        UCI {
-            board: Board::new("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"),
-            search_framework: SearchFramework::new(),
-            debug_mode: false,
+            let (clock, increment) = if self.board.side_to_move() == Color::White {
+                (
+                    arg_value_map
+                        .get("wtime")
+                        .map(|d| Duration::from_millis(d.parse::<u64>().unwrap())),
+                    arg_value_map
+                        .get("winc")
+                        .map(|d| Duration::from_millis(d.parse::<u64>().unwrap())),
+                )
+            } else {
+                (
+                    arg_value_map
+                        .get("btime")
+                        .map(|d| Duration::from_millis(d.parse::<u64>().unwrap())),
+                    arg_value_map
+                        .get("binc")
+                        .map(|d| Duration::from_millis(d.parse::<u64>().unwrap())),
+                )
+            };
+            if let Some(c) = clock {
+                options.set_time_from_clock(c, increment);
+            }
         }
+
+        options
     }
 
     fn args_regex() -> Regex {
@@ -203,6 +218,6 @@ pub enum UCICommand<'a> {
     Id,
     UciOk,
     ReadyOk,
-    BestMove(Move),
+    BestMove(&'a Move),
     Info(&'a Search),
 }

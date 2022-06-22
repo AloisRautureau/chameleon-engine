@@ -19,40 +19,56 @@ use crate::zob_hash::Hash;
 #[derive(Clone)]
 pub struct SearchOptions {
     pub infinite: bool,
-    pub moves_to_search: Option<MoveList>,
+    pub moves_to_search: Option<Vec<Move>>,
     pub moves_until_time_control: Option<u32>,
     pub max_depth: Option<i8>,
     pub max_nodes: Option<u128>,
     pub max_time: Option<Duration>,
 }
-impl SearchOptions {
-    pub fn from_info(
-        infinite: bool,
-        moves_to_search: Option<MoveList>,
-        clock: Option<Duration>,
-        increment: Option<Duration>,
-        moves_until_time_control: Option<u32>,
-        max_depth: Option<i8>,
-        max_nodes: Option<u128>,
-        max_time: Option<Duration>,
-    ) -> SearchOptions {
-        let mut move_time = None;
-        if max_time.is_none() {
-            if let Some(c) = clock {
-                move_time = Some(Self::get_movetime(c, increment))
-            }
-        } else {
-            move_time = max_time
-        }
-
+impl Default for SearchOptions {
+    fn default() -> Self {
         SearchOptions {
-            infinite,
-            moves_to_search,
-            moves_until_time_control,
-            max_depth,
-            max_nodes,
-            max_time: move_time,
+            infinite: true,
+            moves_to_search: None,
+            moves_until_time_control: None,
+            max_depth: None,
+            max_nodes: None,
+            max_time: None,
         }
+    }
+}
+impl SearchOptions {
+    pub fn set_infinite(&mut self, value: bool) -> &mut Self {
+        self.infinite = value;
+        self
+    }
+    pub fn set_moves_to_search(&mut self, value: Option<Vec<Move>>) -> &mut Self {
+        self.moves_to_search = value;
+        self
+    }
+    pub fn set_moves_until_time_control(&mut self, value: Option<u32>) -> &mut Self {
+        self.moves_until_time_control = value;
+        self
+    }
+    pub fn set_depth(&mut self, value: Option<i8>) -> &mut Self {
+        self.max_depth = value;
+        self
+    }
+    pub fn set_nodes_to_search(&mut self, value: Option<u128>) -> &mut Self {
+        self.max_nodes = value;
+        self
+    }
+    pub fn set_time_from_clock(
+        &mut self,
+        clock: Duration,
+        increment: Option<Duration>,
+    ) -> &mut Self {
+        self.max_time = Some(Self::get_movetime(clock, increment));
+        self
+    }
+    pub fn set_time(&mut self, value: Option<Duration>) -> &mut Self {
+        self.max_time = value;
+        self
     }
 
     fn get_movetime(clock: Duration, increment: Option<Duration>) -> Duration {
@@ -65,18 +81,6 @@ impl SearchOptions {
         }
 
         movetime
-    }
-}
-impl Default for SearchOptions {
-    fn default() -> Self {
-        SearchOptions {
-            infinite: true,
-            moves_to_search: None,
-            moves_until_time_control: None,
-            max_depth: None,
-            max_nodes: None,
-            max_time: None,
-        }
     }
 }
 
@@ -103,7 +107,7 @@ impl SearchFramework {
         }
         let result = Arc::new(Mutex::new(Default::default()));
 
-        let thread_count = 4;
+        let thread_count = 12;
         for _ in 0..thread_count {
             self.workers.push(new_worker(
                 position,
@@ -312,7 +316,7 @@ fn search_root(
     };
 
     let root_moves = if let Some(moves) = options.moves_to_search {
-        moves
+        MoveList::from(moves)
     } else {
         generate(&position, GenType::Legal)
     };
@@ -414,7 +418,7 @@ fn search_root(
     let mut res = result.lock().unwrap();
     if !(*res).finished {
         (*res).finished = true;
-        UCI::send(UCICommand::BestMove((*res).best_move.unwrap()))
+        UCI::send(UCICommand::BestMove(&(*res).best_move.unwrap()))
     }
 }
 
@@ -426,7 +430,6 @@ fn alpha_beta(
     mut depth: i8,
     context: &mut SearchContext,
 ) -> Score {
-    *context.nodes_searched += 1;
     if (context.should_stop)() || (context.should_sync)(context.total_depth) {
         return 0;
     }
@@ -472,6 +475,7 @@ fn alpha_beta(
         position.unmake();
 
         if score >= beta {
+            *context.nodes_searched += 1;
             return score;
         }
     }
@@ -521,6 +525,7 @@ fn alpha_beta(
                 // A move searched by another thread has caused a cutoff,
                 // so we can save the effort of searching further
                 if d as i8 >= depth {
+                    *context.nodes_searched += 1;
                     return beta;
                 }
             }
@@ -549,6 +554,7 @@ fn alpha_beta(
         }
         position.unmake();
         if (context.should_stop)() || (context.should_sync)(context.total_depth) {
+            *context.nodes_searched += 1;
             return 0;
         }
         if score >= beta {
@@ -586,6 +592,7 @@ fn alpha_beta(
                 context.killers[(context.total_depth - depth) as usize].swap(0, 1);
                 context.killers[(context.total_depth - depth) as usize].swap(0, 2);
             }
+            *context.nodes_searched += 1;
             return beta;
         }
         if score > best_score {
@@ -672,6 +679,7 @@ fn alpha_beta(
                 context.killers[(context.total_depth - depth) as usize].swap(0, 1);
                 context.killers[(context.total_depth - depth) as usize].swap(0, 2);
             }
+            *context.nodes_searched += 1;
             return beta;
         }
         if score > best_score {
@@ -705,6 +713,7 @@ fn alpha_beta(
         )
     }
 
+    *context.nodes_searched += 1;
     best_score
 }
 
@@ -721,6 +730,7 @@ fn quiescence(
     }
 
     if generate(position, GenType::Legal).is_empty() {
+        *context.nodes_searched += 1;
         return if position.in_check(position.side_to_move()) {
             -Evaluation::MATE_SCORE
         } else {
@@ -730,13 +740,16 @@ fn quiescence(
 
     let mut evaluation = Evaluation::shallow_eval(position);
     if evaluation.is_drawn {
+        *context.nodes_searched += 1;
         return evaluation.score;
     }
 
     if evaluation.score >= beta {
+        *context.nodes_searched += 1;
         return beta;
     }
     if evaluation.score < alpha - Evaluation::MIDGAME_PIECE_TYPE_VALUE[4] {
+        *context.nodes_searched += 1;
         return alpha;
     }
 
@@ -757,6 +770,7 @@ fn quiescence(
         position.unmake();
 
         if score >= beta {
+            *context.nodes_searched += 1;
             return beta;
         }
         if score > alpha {
@@ -764,6 +778,7 @@ fn quiescence(
         }
     }
 
+    *context.nodes_searched += 1;
     alpha
 }
 

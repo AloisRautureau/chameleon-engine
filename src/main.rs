@@ -1,3 +1,5 @@
+use chameleon::uci::UCI;
+
 fn main() {
     println!(
         "chameleon v{}, by {}",
@@ -5,5 +7,6 @@ fn main() {
         env!("CARGO_PKG_AUTHORS")
     );
 
-    chameleon::uci::UCI::run()
+    let mut uci = UCI::default();
+    uci.run()
 }

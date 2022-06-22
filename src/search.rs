@@ -103,7 +103,7 @@ impl SearchFramework {
     pub fn run_search(&mut self, position: &Board, options: &SearchOptions) {
         // A search is currently running
         if self.result.is_some() {
-            return;
+            self.stop_search();
         }
         let result = Arc::new(Mutex::new(Default::default()));
 
@@ -137,24 +137,14 @@ impl SearchFramework {
         };
 
         self.result = None;
-        result
-    }
-
-    /// Returns a result if and only if the current search
-    /// is finished
-    pub fn probe_search(&mut self) -> Option<Search> {
-        let is_finished = if let Some(result_lock) = &self.result {
-            let result_ptr = result_lock.lock().unwrap();
-            (*result_ptr).finished
-        } else {
-            false
-        };
-
-        if is_finished {
-            self.stop_search()
-        } else {
-            None
+        // Print out information for the UCI protocol
+        if let Some(r) = &result {
+            if !r.finished {
+                UCI::send(UCICommand::Info(r));
+                UCI::send(UCICommand::BestMove(&r.best_move.unwrap()))
+            }
         }
+        result
     }
 
     pub fn probe_table(&self, board: &Board) -> SearchInfo {
@@ -418,7 +408,8 @@ fn search_root(
     let mut res = result.lock().unwrap();
     if !(*res).finished {
         (*res).finished = true;
-        UCI::send(UCICommand::BestMove(&(*res).best_move.unwrap()))
+        UCI::send(UCICommand::Info(&(*res)));
+        UCI::send(UCICommand::BestMove(&(*res).best_move.unwrap()));
     }
 }
 

@@ -89,10 +89,7 @@ impl UCI {
                 .search_framework
                 .run_search(&self.board, &self.parse_go_args(args.map(String::from))),
             "stop" => {
-                if let Some(result) = self.search_framework.stop_search() {
-                    UCI::send(UCICommand::Info(&result));
-                    UCI::send(UCICommand::BestMove(&result.best_move.unwrap()))
-                }
+                self.search_framework.stop_search();
             }
             "ponderhit" => (),
             // Commands that are not part of the UCI protocol

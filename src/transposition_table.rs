@@ -1,25 +1,29 @@
 use crate::{evaluation::Score, r#move::Move, zob_hash::Hash};
 use std::sync::{Arc, Mutex};
 
+#[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub enum SearchInfo {
     Exact {
         position_hash: Hash,
+        score: Score,
         best_move: Move,
         depth_searched: u8,
-        score: Score,
+        ply: u8,
     },
     Cutoff {
         position_hash: Hash,
+        lower_bound: Score,
         refutation_move: Move,
         depth_searched: u8,
-        high_bound: Score,
+        ply: u8,
     },
     All {
         position_hash: Hash,
+        higher_bound: Score,
         best_move: Move,
         depth_searched: u8,
-        low_bound: Score,
+        ply: u8,
     },
     None,
 }
@@ -27,25 +31,25 @@ impl SearchInfo {
     pub fn position_hash(&self) -> Option<Hash> {
         match self {
             Self::Exact {
-                position_hash: h, ..
-            } => Some(*h),
+                position_hash, ..
+            } => Some(*position_hash),
             Self::Cutoff {
-                position_hash: h, ..
-            } => Some(*h),
+                position_hash, ..
+            } => Some(*position_hash),
             Self::All {
-                position_hash: h, ..
-            } => Some(*h),
+                position_hash, ..
+            } => Some(*position_hash),
             Self::None => None,
         }
     }
 
     pub fn hash_move(&self) -> Option<Move> {
         match self {
-            Self::Exact { best_move: m, .. } => Some(*m),
+            Self::Exact { best_move, .. } => Some(*best_move),
             Self::Cutoff {
-                refutation_move: m, ..
-            } => Some(*m),
-            Self::All { best_move: m, .. } => Some(*m),
+                refutation_move, ..
+            } => Some(*refutation_move),
+            Self::All { best_move, .. } => Some(*best_move),
             _ => None,
         }
     }
@@ -53,25 +57,48 @@ impl SearchInfo {
     pub fn depth_searched(&self) -> Option<u8> {
         match self {
             Self::Exact {
-                depth_searched: d, ..
-            } => Some(*d),
+                depth_searched, ..
+            } => Some(*depth_searched),
             Self::Cutoff {
-                depth_searched: d, ..
-            } => Some(*d),
+                depth_searched, ..
+            } => Some(*depth_searched),
             Self::All {
-                depth_searched: d, ..
-            } => Some(*d),
+                depth_searched, ..
+            } => Some(*depth_searched),
             Self::None => None,
         }
     }
 
     pub fn bound(&self) -> Option<Score> {
         match self {
-            Self::Exact { score: b, .. } => Some(*b),
-            Self::Cutoff { high_bound: b, .. } => Some(*b),
-            Self::All { low_bound: b, .. } => Some(*b),
+            Self::Exact { score, .. } => Some(*score),
+            Self::Cutoff { lower_bound, .. } => Some(*lower_bound),
+            Self::All { higher_bound, .. } => Some(*higher_bound),
             Self::None => None,
         }
+    }
+
+    pub fn last_probed_ply(&self) -> Option<u8> {
+        match self {
+            Self::Exact { ply, .. } => Some(*ply),
+            Self::Cutoff { ply, .. } => Some(*ply),
+            Self::All { ply, .. } => Some(*ply),
+            Self::None => None,
+        }
+    }
+
+    pub fn update_ply(&mut self, probed_ply: u32) {
+        let probed_ply = probed_ply as u8;
+        match self {
+            Self::Exact { ply, .. } => *ply = std::cmp::max(probed_ply, *ply),
+            Self::Cutoff { ply, .. } => *ply = std::cmp::max(probed_ply, *ply),
+            Self::All { ply, .. } => *ply = std::cmp::max(probed_ply, *ply),
+            Self::None => (),
+        }
+    }
+
+    pub fn is_pv_node(&self) -> bool {
+        matches!(self, SearchInfo::Exact { .. })
     }
 }
 impl Default for SearchInfo {
@@ -110,15 +137,17 @@ impl TranspositionTable {
         TranspositionTable(HashTable::new(2_usize.pow(20) - 1))
     }
 
-    pub fn get(&self, hash: Hash) -> SearchInfo {
+    pub fn get(&self, hash: Hash, ply: u32) -> SearchInfo {
         let ptr = self.0.get(hash);
-        let lock = ptr.lock().unwrap();
-        let (depth_tier, young_tier) = *lock;
+        let mut lock = ptr.lock().unwrap();
+        let (depth_tier, young_tier) = &mut *lock;
 
         if depth_tier.position_hash() == Some(hash) {
-            depth_tier
+            depth_tier.update_ply(ply);
+            *depth_tier
         } else if young_tier.position_hash() == Some(hash) {
-            young_tier
+            young_tier.update_ply(ply);
+            *young_tier
         } else {
             SearchInfo::None
         }
@@ -136,45 +165,14 @@ impl TranspositionTable {
         }
     }
 
-    /// Returns the best move from an exact entry if it exists for the
-    /// given hash
-    pub fn pv_move(&self, hash: Hash) -> Option<Move> {
-        let ptr = self.0.get(hash);
-        let lock = ptr.lock().unwrap();
-        let (depth_tier, young_tier) = *lock;
-
-        if let SearchInfo::Exact {
-            best_move: m,
-            position_hash: h,
-            ..
-        } = depth_tier
-        {
-            if h == hash {
-                Some(m)
-            } else {
-                None
-            }
-        } else if let SearchInfo::Exact {
-            best_move: m,
-            position_hash: h,
-            ..
-        } = young_tier
-        {
-            if h == hash {
-                Some(m)
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    }
-
-    // Prioritize:
-    // - Exact > Cutoff > All
-    // - depth otherwise
     fn should_replace(old_info: &SearchInfo, new_info: &SearchInfo) -> bool {
-        old_info.depth_searched() < new_info.depth_searched()
+        let by_age = new_info.last_probed_ply()
+            .map(|x| match old_info.last_probed_ply() {
+                Some(y) => x - y,
+                None => u8::MAX
+            }) >= Some(8);
+        let by_depth = old_info.depth_searched() < new_info.depth_searched();
+        by_age || by_depth
     }
 }
 impl Default for TranspositionTable {

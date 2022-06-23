@@ -6,11 +6,13 @@ use crate::square::Square;
 
 use crate::r#move::Move;
 use std::cmp::max;
+use rand::Rng;
 
 // Build script to calculate evaluation constants at compile time
 include!(concat!(env!("OUT_DIR"), "/evaluation_constants.rs"));
 
 pub type Score = i32;
+#[derive(PartialEq, Eq)]
 pub enum GamePhase {
     Opening,
     MiddleGame,
@@ -25,9 +27,9 @@ pub struct Evaluation {
 }
 impl Evaluation {
     pub const MIDGAME_PIECE_TYPE_VALUE: [Score; 6] =
-        [100, 300, 350, 500, 900, Self::MATE_SCORE - 1];
+        [100, 300, 350, 500, 900, 9999];
     pub const ENDGAME_PIECE_TYPE_VALUE: [Score; 6] =
-        [120, 250, 300, 550, 850, Self::MATE_SCORE - 1];
+        [120, 250, 300, 550, 850, 9999];
     pub const MATE_SCORE: Score = i32::MAX / 2;
     pub const DRAW_SCORE: Score = 0;
     pub const PHASE_VALUE: [Score; 6] = [0, 1, 1, 2, 4, 0];
@@ -42,6 +44,21 @@ impl Evaluation {
                 is_drawn: true,
                 full_eval: true,
             };
+        }
+        if board.king_square(board.side_to_move()).is_none() {
+            return Evaluation {
+                score: -Self::MATE_SCORE,
+                game_phase: GamePhase::EndGame,
+                is_drawn: false,
+                full_eval: true
+            }
+        } else if board.king_square(board.side_to_move().opposite()).is_none() {
+            return Evaluation {
+                score: Self::MATE_SCORE,
+                game_phase: GamePhase::EndGame,
+                is_drawn: false,
+                full_eval: true
+            }
         }
 
         let mut phase = 0;
@@ -72,16 +89,19 @@ impl Evaluation {
         } else if phase >= 4 {
             GamePhase::MiddleGame
         } else {
-            GamePhase::Opening
+            GamePhase::EndGame
         };
         phase = std::cmp::min(phase, Self::MAX_PHASE);
         let us_index = board.side_to_move() as usize;
         let mg_score = mg_scores[us_index] - mg_scores[us_index ^ 1];
         let eg_score = eg_scores[us_index] - eg_scores[us_index ^ 1];
-        //println!("phase value {}, mg {}, eg {}", phase, mg_score, eg_score);
+
+        // A small random noise to avoid search pathology as proposed by
+        // Don Beal and Martin C. Smith
+        let noise = rand::thread_rng().gen_range(-10..10);
 
         Evaluation {
-            score: ((mg_score * phase) + (eg_score * (Self::MAX_PHASE - phase))) / Self::MAX_PHASE,
+            score: ((mg_score * phase) + (eg_score * (Self::MAX_PHASE - phase))) / Self::MAX_PHASE + noise,
             game_phase,
             is_drawn: false,
             full_eval: false,
@@ -145,27 +165,18 @@ impl Evaluation {
             * 30;
 
         // Mobility evaluation
-        // TODO
-
-        // Center control evaluation
-        let (w_attack_map, b_attack_map) = (
-            board.attack_map(Color::White, Bitboard::EMPTY),
-            board.attack_map(Color::Black, Bitboard::EMPTY),
-        );
-        let (w_safe_squares, b_safe_squares) =
-            (w_attack_map & !b_attack_map, b_attack_map & !w_attack_map);
-        let (w_center_control, b_center_control) = (
-            w_safe_squares & Bitboard::CENTER,
-            b_safe_squares & Bitboard::CENTER,
-        );
-        let (w_large_center_control, b_large_center_control) = (
-            w_safe_squares & Bitboard::LARGE_CENTER,
-            b_safe_squares & Bitboard::LARGE_CENTER,
-        );
-        scores[Color::White as usize] += w_center_control.pop_count() as Score * 5
-            + w_large_center_control.pop_count() as Score * 2;
-        scores[Color::Black as usize] += b_center_control.pop_count() as Score * 5
-            + b_large_center_control.pop_count() as Score * 2;
+        if board.in_check(board.side_to_move()) {
+            scores[board.side_to_move() as usize] -= 200;
+        } else {
+            // Pinned pieces are bad, otherwise we count by
+            // the number of squares a piece can reach
+            let (w_pins, b_pins) = (
+                board.pins(board.king_square(Color::White).unwrap()).0,
+                board.pins(board.king_square(Color::Black).unwrap()).0
+            );
+            scores[Color::White as usize] -= w_pins.pop_count() as Score * 50;
+            scores[Color::Black as usize] -= b_pins.pop_count() as Score * 50;
+        }
 
         self.score += scores[board.side_to_move() as usize]
             - scores[board.side_to_move().opposite() as usize];

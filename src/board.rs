@@ -342,6 +342,11 @@ impl Board {
             .is_capture()
     }
 
+    pub fn last_was_null(&self) -> bool {
+        self.history_entries[self.history_entries.len() - 1]
+            .move_played == Move::NULL_MOVE
+    }
+
     pub fn in_check(&self, side: Color) -> bool {
         let king_square = if let Some(sq) = self.king_square(side) {
             sq
@@ -510,10 +515,11 @@ impl Board {
         }
         if empty_counter != 0 {
             fen.push_str(&empty_counter.to_string());
-            fen.push(' ');
         }
+        fen.push(' ');
 
         fen.push_str(&self.side_to_move.to_string());
+        fen.push(' ');
         fen.push_str(&self.castling_rights.to_string());
         match self.ep_target {
             Some(sq) => fen.push_str(&(" ".to_owned() + &square_representation(sq).unwrap() + " ")),

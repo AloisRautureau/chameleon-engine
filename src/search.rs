@@ -5,7 +5,7 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use crate::board::Board;
-use crate::evaluation::{Evaluation, Score};
+use crate::evaluation::{Evaluation, GamePhase, Score};
 use crate::move_generator::{generate, GenType};
 use crate::movelist::MoveList;
 use crate::r#move::Move;
@@ -107,7 +107,7 @@ impl SearchFramework {
         }
         let result = Arc::new(Mutex::new(Default::default()));
 
-        let thread_count = 12;
+        let thread_count = 4;
         for _ in 0..thread_count {
             self.workers.push(new_worker(
                 board,
@@ -142,7 +142,7 @@ impl SearchFramework {
 
     pub fn probe_table(&self, board: &Board) -> SearchInfo {
         let hash = board.get_hash();
-        self.transposition_table.get(hash)
+        self.transposition_table.get(hash, 0)
     }
 }
 
@@ -250,10 +250,17 @@ struct SearchContext<'a> {
     pub searched_moves: Arc<HashTable<[Option<Hash>; 4]>>,
     pub killers: [[Option<Move>; 3]; 32],
     pub total_depth: i8,
-    pub null_allowed: bool,
     pub nodes_searched: &'a mut u128,
-    pub should_stop: &'a (dyn Fn() -> bool),
-    pub should_sync: &'a (dyn Fn(i8) -> bool),
+    pub stop_func: &'a (dyn Fn() -> bool),
+    pub should_stop: bool,
+    pub sync_func: &'a (dyn Fn(i8) -> bool),
+    pub should_sync: bool,
+}
+impl<'a> SearchContext<'a> {
+    pub fn update_flags(&mut self) {
+        self.should_stop = (self.stop_func)();
+        self.should_sync = (self.sync_func)(self.total_depth);
+    }
 }
 fn search_root(
     mut board: Board,
@@ -299,10 +306,11 @@ fn search_root(
         searched_moves,
         killers: Default::default(),
         total_depth: 1,
-        null_allowed: true,
         nodes_searched: &mut nodes,
-        should_stop: &stop_func,
-        should_sync: &sync_func,
+        stop_func: &stop_func,
+        should_stop: false,
+        sync_func: &sync_func,
+        should_sync: false
     };
 
     let root_moves = if let Some(moves) = options.moves_to_search {
@@ -315,6 +323,7 @@ fn search_root(
     let mut previous_iteration_best_move = None;
     'iterative_deepening: while context.total_depth <= options.max_depth.unwrap_or(MAX_DEPTH) {
         let mut iteration_best_move = None;
+        let mut iteration_score = -Evaluation::MATE_SCORE - 1;
         let (mut alpha_window, mut beta_window) = (BASE_WINDOW, BASE_WINDOW);
         let (mut alpha, mut beta) = (
             previous_iteration_score - alpha_window,
@@ -328,10 +337,11 @@ fn search_root(
         ));
 
         for mv in moves_iter {
-            if (context.should_stop)() {
+            context.update_flags();
+            if context.should_stop {
                 break 'iterative_deepening;
             }
-            if (context.should_sync)(context.total_depth) {
+            if context.should_sync {
                 break;
             }
             board.make(*mv);
@@ -343,7 +353,7 @@ fn search_root(
                 &mut context,
             );
             // The score falls out of our aspiration window, therefore we widen it
-            if score <= alpha || score >= beta {
+            while (score > -Evaluation::MATE_SCORE && score <= alpha) || (score >= beta && score < Evaluation::MATE_SCORE) {
                 if score <= alpha {
                     alpha_window *= 2
                 } else {
@@ -359,21 +369,25 @@ fn search_root(
                     &mut context,
                 );
             }
-            if score > alpha {
+            if score > iteration_score {
                 iteration_best_move = Some(mv);
-                alpha = score;
+                iteration_score = score;
+                if score > alpha {
+                    alpha = score;
+                }
             }
             board.unmake();
         }
-        if (context.should_stop)() {
+        if context.should_stop {
             break 'iterative_deepening;
         }
 
         let mut res = result.lock().unwrap();
+        if (*res).finished { return }
         if (*res).depth_reached >= context.total_depth {
             // We assume that we're not two whole plies behind
             // Something would be seriously wrong otherwise
-            context.total_depth += 1;
+            context.total_depth = (*res).depth_reached + 1;
             previous_iteration_score = (*res).score;
             previous_iteration_best_move = (*res).best_move;
             drop(res);
@@ -387,11 +401,12 @@ fn search_root(
                 position_hash: board.get_hash(),
                 best_move: *mv,
                 depth_searched: context.total_depth as u8,
-                score: alpha,
+                score: iteration_score,
+                ply: board.halfmove_clock() as u8
             },
         );
         (*res).best_move = Some(*mv);
-        (*res).score = alpha;
+        (*res).score = iteration_score;
         (*res).depth_reached = context.total_depth;
         (*res).time = start.elapsed();
         (*res).principal_variation = collect_pv(&mut board, &context);
@@ -400,7 +415,11 @@ fn search_root(
         UCI::send(UCICommand::Info(&*res));
         drop(res);
 
-        previous_iteration_score = alpha;
+        if iteration_score <= -Evaluation::MATE_SCORE || iteration_score >= Evaluation::MATE_SCORE {
+            break
+        }
+
+        previous_iteration_score = iteration_score;
         previous_iteration_best_move = Some(*mv);
         context.total_depth += 1;
     }
@@ -419,46 +438,45 @@ fn alpha_beta(
     mut depth: i8,
     context: &mut SearchContext,
 ) -> Score {
-    if (context.should_stop)() || (context.should_sync)(context.total_depth) {
-        return 0;
-    }
+    context.update_flags();
 
-    if Evaluation::is_drawn(board) {
-        return Evaluation::DRAW_SCORE;
-    }
     let in_check = board.in_check(board.side_to_move());
     if in_check {
         depth += 1
     } // Check extension to avoid horizon effect
 
-    if depth <= HORIZON {
+    if depth <= HORIZON || context.should_stop || context.should_sync {
         return quiescence(board, alpha, beta, context);
     }
-    // Futility pruning
-    let enable_futility_pruning = !in_check && !board.last_was_capture();
+
+    let eval = Evaluation::shallow_eval(board);
+    let tt_info = context.transposition_table.get(board.get_hash(), board.halfmove_clock());
+
+    // Pruning
+    let enable_futility_pruning = depth <= SHALLOW && !in_check && !board.last_was_capture() && !board.last_was_null();
     if enable_futility_pruning {
         let futility_margin = Evaluation::MIDGAME_PIECE_TYPE_VALUE[2];
         let extended_futility_margin = Evaluation::MIDGAME_PIECE_TYPE_VALUE[3];
         let razoring_margin = Evaluation::MIDGAME_PIECE_TYPE_VALUE[4];
-        if (depth == FRONTIER && Evaluation::shallow_eval(board).score + futility_margin <= alpha)
+        if (depth == FRONTIER && eval.score + futility_margin <= alpha)
             || (depth == PRE_FRONTIER
-                && Evaluation::shallow_eval(board).score + extended_futility_margin <= alpha)
+                && eval.score + extended_futility_margin <= alpha)
         {
             return quiescence(board, alpha, beta, context);
-        } else if depth == SHALLOW && Evaluation::shallow_eval(board).score + razoring_margin <= alpha
+        } else if depth == SHALLOW && eval.score + razoring_margin <= alpha
         {
             depth -= 1
         }
     }
 
+
     // Null move reduction
-    if context.null_allowed && !in_check {
+    if eval.game_phase != GamePhase::EndGame && !tt_info.is_pv_node() && depth > SHALLOW && !board.last_was_null() && !in_check {
         let reduced_depth = if depth > 6 {
-            depth - (4 + (depth as f32).sqrt() as i8)
+            depth - 4
         } else {
             depth - 3
         };
-        context.null_allowed = false;
         board.make(Move::NULL_MOVE);
         let score = -alpha_beta(board, -beta, -beta + 1, reduced_depth, context);
         board.unmake();
@@ -468,21 +486,14 @@ fn alpha_beta(
             return score;
         }
     }
-    if !context.null_allowed {
-        context.null_allowed = true
-    }
 
-    // Check what the eventual TT hit gives us
-    let mut best_move = {
-        let tt_info = context.transposition_table.get(board.get_hash());
-        // The table has information about a deeper search that we can use
-        // as is
-        if tt_info.depth_searched() >= Some(depth as u8) {
-            return tt_info.bound().unwrap();
-        } else {
-            tt_info.hash_move()
-        }
-    };
+    // The table has information about a deeper search that we can use
+    // as is
+    if depth >= SHALLOW && tt_info.depth_searched() >= Some(depth as u8) {
+        *context.nodes_searched += 1;
+        return tt_info.bound().unwrap()
+    }
+    let mut best_move = tt_info.hash_move();
 
     let moves = generate(board, GenType::Legal);
     if moves.is_empty() {
@@ -507,14 +518,14 @@ fn alpha_beta(
         }
         if !deferred_moves.is_empty() && depth >= SHALLOW + 1 {
             if let SearchInfo::Cutoff {
-                depth_searched: d, ..
-            } = context.transposition_table.get(board.get_hash())
+                depth_searched, lower_bound, ..
+            } = context.transposition_table.get(board.get_hash(), board.halfmove_clock())
             {
                 // A move searched by another thread has caused a cutoff,
                 // so we can save the effort of searching further
-                if d as i8 >= depth {
+                if depth_searched as i8 >= depth {
                     *context.nodes_searched += 1;
-                    return beta;
+                    return lower_bound;
                 }
             }
         }
@@ -526,6 +537,9 @@ fn alpha_beta(
             let allow_reduction = mv_index > 4 && !in_check && depth >= SHALLOW && !mv.is_capture();
             search_move(board, mv, mv_index, alpha, beta, depth, allow_reduction, context)
         };
+        if context.should_sync || context.should_stop {
+            return best_score
+        }
 
         if score >= beta {
             context.transposition_table.set(
@@ -534,7 +548,8 @@ fn alpha_beta(
                     position_hash: board.get_hash(),
                     refutation_move: *mv,
                     depth_searched: depth as u8,
-                    high_bound: beta,
+                    lower_bound: score,
+                    ply: board.halfmove_clock() as u8
                 },
             );
             // Store the move for move ordering killer heuristics
@@ -542,7 +557,7 @@ fn alpha_beta(
                 store_killer(*mv, (context.total_depth - depth) as usize, &mut context.killers)
             }
             *context.nodes_searched += 1;
-            return beta;
+            return score;
         }
         if score > best_score {
             best_score = score;
@@ -555,6 +570,7 @@ fn alpha_beta(
                         best_move: *mv,
                         depth_searched: depth as u8,
                         score,
+                        ply: board.halfmove_clock() as u8
                     },
                 );
                 pv_search = false;
@@ -575,6 +591,9 @@ fn alpha_beta(
             let allow_reduction = mv_index > 4 && !in_check && depth >= SHALLOW && !mv.is_capture();
             search_move(board, &mv, mv_index, alpha, beta, depth, allow_reduction, context)
         };
+        if context.should_sync || context.should_stop {
+            return best_score;
+        }
 
         if score >= beta {
             context.transposition_table.set(
@@ -583,7 +602,8 @@ fn alpha_beta(
                     position_hash: board.get_hash(),
                     refutation_move: mv,
                     depth_searched: depth as u8,
-                    high_bound: beta,
+                    lower_bound: score,
+                    ply: board.halfmove_clock() as u8
                 },
             );
             // Store the move for killer heuristics
@@ -591,7 +611,7 @@ fn alpha_beta(
                 store_killer(mv, (context.total_depth - depth) as usize, &mut context.killers)
             }
             *context.nodes_searched += 1;
-            return beta;
+            return score;
         }
         if score > best_score {
             best_score = score;
@@ -604,6 +624,7 @@ fn alpha_beta(
                         best_move: mv,
                         depth_searched: depth as u8,
                         score,
+                        ply: board.halfmove_clock() as u8
                     },
                 );
                 pv_search = false;
@@ -612,15 +633,16 @@ fn alpha_beta(
         }
     }
 
-    // We never reached alpha
-    if best_score < alpha {
+    // We never exceeded alpha
+    if pv_search {
         context.transposition_table.set(
             board.get_hash(),
             SearchInfo::All {
                 best_move: best_move.unwrap(),
                 position_hash: board.get_hash(),
                 depth_searched: depth as u8,
-                low_bound: best_score,
+                higher_bound: best_score,
+                ply: board.halfmove_clock() as u8
             },
         )
     }
@@ -642,7 +664,7 @@ fn search_move(board: &mut Board, mv: &Move, mv_index: usize, alpha: Score, beta
     let depth_to_search = if reduce && mv_index < 6 {
         depth - 2
     } else if reduce {
-        depth >> 1
+        depth - 1 - (depth/3)
     } else {
         depth - 1
     };
@@ -689,11 +711,10 @@ fn quiescence(
     beta: Score,
     context: &mut SearchContext,
 ) -> Score {
-    if (context.should_stop)() || (context.should_sync)(context.total_depth) {
-        return 0;
-    }
+    context.update_flags();
 
-    if generate(board, GenType::Legal).is_empty() {
+    let legal_moves = generate(board, GenType::Legal);
+    if legal_moves.is_empty() {
         *context.nodes_searched += 1;
         return if board.in_check(board.side_to_move()) {
             -Evaluation::MATE_SCORE
@@ -703,6 +724,10 @@ fn quiescence(
     }
 
     let mut evaluation = Evaluation::shallow_eval(board);
+    evaluation.deep_eval(board);
+    if context.should_stop || context.should_sync {
+        return evaluation.score;
+    }
     if evaluation.is_drawn {
         *context.nodes_searched += 1;
         return evaluation.score;
@@ -710,40 +735,45 @@ fn quiescence(
 
     if evaluation.score >= beta {
         *context.nodes_searched += 1;
-        return beta;
+        return evaluation.score;
     }
     if evaluation.score < alpha - Evaluation::MIDGAME_PIECE_TYPE_VALUE[4] {
         *context.nodes_searched += 1;
-        return alpha;
+        return evaluation.score;
     }
-
-    evaluation.deep_eval(board);
-    if alpha < evaluation.score {
+    if evaluation.score > alpha {
         alpha = evaluation.score
     }
     let captures = generate(board, GenType::Captures);
     let moves_iter = captures.best_first_iter(&score_quiescence(board));
 
+    let mut best_score = evaluation.score;
     for mv in moves_iter {
-        if Evaluation::see(board, *mv) <= 0 {
+        if Evaluation::see(board, *mv) < 0 {
             break;
         }
 
         board.make(*mv);
         let score = -quiescence(board, -beta, -alpha, context);
         board.unmake();
+        if context.should_sync || context.should_stop {
+            return best_score
+        }
 
         if score >= beta {
             *context.nodes_searched += 1;
-            return beta;
+            return score;
         }
-        if score > alpha {
-            alpha = score
+        if score > best_score {
+            best_score = score;
+            if score > alpha {
+                alpha = score;
+            }
         }
     }
 
     *context.nodes_searched += 1;
-    alpha
+    best_score
 }
 
 fn score_moves<'a>(
@@ -772,7 +802,7 @@ fn score_quiescence(board: &Board) -> impl Fn(&Move) -> Score + '_ {
 
 fn collect_pv(board: &mut Board, context: &SearchContext) -> Vec<Move> {
     let mut pv = Vec::with_capacity(context.total_depth as usize);
-    while let Some(m) = context.transposition_table.pv_move(board.get_hash()) {
+    while let Some(m) = context.transposition_table.get(board.get_hash(), 0).hash_move() {
         board.make(m);
         pv.push(m);
     }

@@ -100,15 +100,15 @@ impl SearchFramework {
         }
     }
 
-    pub fn run_search(&mut self, board: &Board, options: &SearchOptions) {
+    pub fn run_search(&mut self, board: &Board, threads: u16, options: &SearchOptions) {
         // A search is currently running
         if self.result.is_some() {
             self.stop_search();
         }
         let result = Arc::new(Mutex::new(Default::default()));
 
-        let thread_count = 4;
-        for _ in 0..thread_count {
+        println!("spawning {} workers", threads);
+        for _ in 0..threads {
             self.workers.push(new_worker(
                 board,
                 options,
@@ -355,9 +355,9 @@ fn search_root(
             // The score falls out of our aspiration window, therefore we widen it
             while (score > -Evaluation::MATE_SCORE && score <= alpha) || (score >= beta && score < Evaluation::MATE_SCORE) {
                 if score <= alpha {
-                    alpha_window *= 2
+                    alpha_window *= 4
                 } else {
-                    beta_window *= 2
+                    beta_window *= 4
                 };
                 alpha = previous_iteration_score - alpha_window;
                 beta = previous_iteration_score + beta_window;

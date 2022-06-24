@@ -7,13 +7,16 @@ use crate::search::{Search, SearchFramework, SearchOptions};
 use regex::Regex;
 use rustyline::config::Configurer;
 use rustyline::Editor;
+use num_cpus;
 use std::collections::HashMap;
 use std::time::Duration;
+use std::fmt::{Display, Formatter, Error};
 
 pub struct UCI {
     board: Board,
     search_framework: SearchFramework,
     editor: Editor<()>,
+    options: HashMap<String, UCIOption>,
     debug_mode: bool,
 }
 impl Default for UCI {
@@ -26,6 +29,15 @@ impl Default for UCI {
             search_framework: SearchFramework::new(),
             editor,
             debug_mode: false,
+            options: HashMap::from([
+                ("ThreadCount".to_string(), UCIOption::IntValue {
+                    name: "ThreadCount".to_string(),
+                    value: 1,
+                    default: 1,
+                    min: 1,
+                    max: num_cpus::get() as i32
+                }),
+            ])
         }
     }
 }
@@ -60,11 +72,33 @@ impl UCI {
         match cmd {
             "uci" => {
                 Self::send(UCICommand::Id);
-                Self::send(UCICommand::UciOk)
+                self.options
+                    .iter()
+                    .for_each(|o| Self::send(UCICommand::UciOption(o.1)));
+                Self::send(UCICommand::UciOk);
             }
-            "debug" => self.debug_mode = args.next().unwrap() == "on",
+            "debug" => self.debug_mode = args.next().unwrap_or("off") == "on",
             "isready" => Self::send(UCICommand::ReadyOk),
-            "setoption" => (),
+            "setoption" => {
+                let option_name = if let Some("name") = args.next() {
+                    args.next().unwrap_or("")
+                } else {
+                    ""
+                };
+                let option_value = match args.skip(1).next() {
+                    Some(v) => v,
+                    None => {
+                        if let Some(UCIOption::Callback { func, .. }) = self.options.get(option_name) {
+                            func();
+                            return Ok(UCIOkCode::OkCommand);
+                        }
+                        return Err(UCIErrCode::MissingArg(String::from("<value>")))
+                    }
+                };
+                if let Some(option) = self.options.get_mut(option_name) {
+                    option.set_value(option_value);
+                }
+            },
             "ucinewgame" => {
                 self.board = Board::new("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
             }
@@ -88,7 +122,15 @@ impl UCI {
             }
             "go" => self
                 .search_framework
-                .run_search(&self.board, &self.parse_go_args(args.map(String::from))),
+                .run_search(
+                    &self.board,
+                    if let Some(UCIOption::IntValue { value, .. }) = self.options.get("ThreadCount") {
+                        *value as u16
+                    } else {
+                        1
+                    },
+                    &self.parse_go_args(args.map(String::from))
+                ),
             "stop" => {
                 self.search_framework.stop_search();
             }
@@ -111,7 +153,8 @@ impl UCI {
             UCICommand::UciOk => println!("uciok"),
             UCICommand::ReadyOk => println!("readyok"),
             UCICommand::BestMove(mv) => println!("bestmove {}", mv),
-            UCICommand::Info(search_state) => println!("info {}", search_state,),
+            UCICommand::Info(search_state) => println!("info {}", search_state),
+            UCICommand::UciOption(option) => println!("option {}", option)
         }
     }
 
@@ -152,39 +195,39 @@ impl UCI {
             .set_moves_until_time_control(
                 arg_value_map
                     .get("movestogo")
-                    .map(|d| d.parse::<u32>().unwrap()),
+                    .map_or(None, |d| d.parse::<u32>().ok()),
             )
             .set_nodes_to_search(
                 arg_value_map
                     .get("nodes")
-                    .map(|d| d.parse::<u128>().unwrap()),
+                    .map_or(None, |d| d.parse::<u128>().ok()),
             )
-            .set_depth(arg_value_map.get("depth").map(|d| d.parse::<i8>().unwrap()));
+            .set_depth(arg_value_map.get("depth").map_or(None, |d| d.parse::<i8>().ok()));
 
         if arg_value_map.contains_key("movetime") {
             options.set_time(
                 arg_value_map
                     .get("movetime")
-                    .map(|d| Duration::from_millis(d.parse::<u64>().unwrap())),
+                    .map(|d| Duration::from_millis(d.parse::<u64>().unwrap_or(0))),
             );
         } else {
             let (clock, increment) = if self.board.side_to_move() == Color::White {
                 (
                     arg_value_map
                         .get("wtime")
-                        .map(|d| Duration::from_millis(d.parse::<u64>().unwrap())),
+                        .map(|d| Duration::from_millis(d.parse::<u64>().unwrap_or(0))),
                     arg_value_map
                         .get("winc")
-                        .map(|d| Duration::from_millis(d.parse::<u64>().unwrap())),
+                        .map(|d| Duration::from_millis(d.parse::<u64>().unwrap_or(0))),
                 )
             } else {
                 (
                     arg_value_map
                         .get("btime")
-                        .map(|d| Duration::from_millis(d.parse::<u64>().unwrap())),
+                        .map(|d| Duration::from_millis(d.parse::<u64>().unwrap_or(0))),
                     arg_value_map
                         .get("binc")
-                        .map(|d| Duration::from_millis(d.parse::<u64>().unwrap())),
+                        .map(|d| Duration::from_millis(d.parse::<u64>().unwrap_or(0))),
                 )
             };
             if let Some(c) = clock {
@@ -237,4 +280,88 @@ pub enum UCICommand<'a> {
     ReadyOk,
     BestMove(&'a Move),
     Info(&'a Search),
+    UciOption(&'a UCIOption)
+}
+
+pub enum UCIOption {
+    BoolValue {
+        name: String,
+        value: bool,
+        default: bool,
+    },
+    IntValue {
+        name: String,
+        value: i32,
+        default: i32,
+        min: i32,
+        max: i32,
+    },
+    Callback {
+        name: String,
+        func: Box<dyn Fn() -> ()>
+    },
+    StringValue {
+        name: String,
+        value: String,
+        default: String
+    },
+    StringChoice {
+        name: String,
+        value: String,
+        default: String,
+        possible_values: Vec<String>,
+    }
+}
+impl UCIOption {
+    pub fn set_value(&mut self, v: &str) {
+        match self {
+            Self::BoolValue { value, .. } => *value = v.parse::<bool>().unwrap_or(*value),
+            Self::IntValue { value, min, max, .. } => {
+                let parsed = v.parse::<i32>().unwrap_or(*value);
+                *value = std::cmp::min(std::cmp::max(parsed, *min), *max)
+            },
+            Self::StringValue { value, .. } => *value = v.to_string(),
+            Self::StringChoice { value, possible_values, .. } => {
+                let set_to = possible_values
+                    .iter()
+                    .find(|x| x.as_str() == v)
+                    .unwrap_or(value);
+                *value = set_to.to_string();
+            },
+            _ => ()
+        }
+    }
+}
+impl Display for UCIOption {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), Error> {
+        match self {
+            Self::BoolValue {
+                name,
+                default,
+                ..
+            } => write!(f, "name {} type check default {}", name, default),
+            Self::IntValue {
+                name,
+                default,
+                min,
+                max,
+                ..
+            } => write!(f, "name {} type spin default {} min {} max {}", name, default, min, max),
+            Self::Callback {
+                name,
+                ..
+            } => write!(f, "name {} type button", name),
+            Self::StringValue {
+                name,
+                default,
+                ..
+            } => write!(f, "name {} type string default {}", name, default),
+            Self::StringChoice {
+                name,
+                default,
+                possible_values,
+                ..
+            } => write!(f, "name {} type combo default {} {}", name, default, possible_values.iter().fold(String::new(), |acc, x| format!("{} var {}", acc, x)))
+        }
+    }
 }

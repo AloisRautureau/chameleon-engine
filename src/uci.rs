@@ -86,7 +86,7 @@ impl UCI {
                 } else {
                     ""
                 };
-                let option_value = match args.skip(1).next() {
+                let option_value = match args.nth(1) {
                     Some(v) => v,
                     None => {
                         if let Some(UCIOption::Callback { func, .. }) =
@@ -196,17 +196,17 @@ impl UCI {
             .set_moves_until_time_control(
                 arg_value_map
                     .get("movestogo")
-                    .map_or(None, |d| d.parse::<u32>().ok()),
+                    .and_then(|d| d.parse::<u32>().ok()),
             )
             .set_nodes_to_search(
                 arg_value_map
                     .get("nodes")
-                    .map_or(None, |d| d.parse::<u128>().ok()),
+                    .and_then(|d| d.parse::<u128>().ok()),
             )
             .set_depth(
                 arg_value_map
                     .get("depth")
-                    .map_or(None, |d| d.parse::<i8>().ok()),
+                    .and_then(|d| d.parse::<i8>().ok()),
             );
 
         if arg_value_map.contains_key("movetime") {
@@ -303,7 +303,7 @@ pub enum UCIOption {
     },
     Callback {
         name: String,
-        func: Box<dyn Fn() -> ()>,
+        func: Box<dyn Fn()>,
     },
     StringValue {
         name: String,

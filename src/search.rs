@@ -522,7 +522,7 @@ fn alpha_beta(
             deferred_moves.push((mv_index, *mv));
             continue;
         }
-        if !deferred_moves.is_empty() && depth >= SHALLOW + 1 {
+        if !deferred_moves.is_empty() && depth > SHALLOW {
             if let SearchInfo::Cutoff {
                 depth_searched,
                 lower_bound,

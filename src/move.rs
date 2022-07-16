@@ -44,9 +44,9 @@ impl Move {
             target as u16,
             0b1000
                 | match promote_to {
-                    PieceType::Knight => 0b00,
-                    PieceType::Bishop => 0b01,
-                    PieceType::Rook => 0b10,
+                    Knight => 0b00,
+                    Bishop => 0b01,
+                    Rook => 0b10,
                     _ => 0b11,
                 },
         )
@@ -65,9 +65,9 @@ impl Move {
             target as u16,
             0b1100
                 | match promote_to {
-                    PieceType::Knight => 0b00,
-                    PieceType::Bishop => 0b01,
-                    PieceType::Rook => 0b10,
+                    Knight => 0b00,
+                    Bishop => 0b01,
+                    Rook => 0b10,
                     _ => 0b11,
                 },
         )
@@ -95,14 +95,14 @@ impl Move {
             0b0011 => MoveFlags::QueenSideCastle,
             0b0100 => MoveFlags::Capture,
             0b0101 => MoveFlags::EnPassant,
-            0b1000 => MoveFlags::Promotion(PieceType::Knight),
-            0b1001 => MoveFlags::Promotion(PieceType::Bishop),
-            0b1010 => MoveFlags::Promotion(PieceType::Rook),
-            0b1011 => MoveFlags::Promotion(PieceType::Queen),
-            0b1100 => MoveFlags::PromotionCapture(PieceType::Knight),
-            0b1101 => MoveFlags::PromotionCapture(PieceType::Bishop),
-            0b1110 => MoveFlags::PromotionCapture(PieceType::Rook),
-            0b1111 => MoveFlags::PromotionCapture(PieceType::Queen),
+            0b1000 => MoveFlags::Promotion(Knight),
+            0b1001 => MoveFlags::Promotion(Bishop),
+            0b1010 => MoveFlags::Promotion(Rook),
+            0b1011 => MoveFlags::Promotion(Queen),
+            0b1100 => MoveFlags::PromotionCapture(Knight),
+            0b1101 => MoveFlags::PromotionCapture(Bishop),
+            0b1110 => MoveFlags::PromotionCapture(Rook),
+            0b1111 => MoveFlags::PromotionCapture(Queen),
             _ => MoveFlags::Quiet,
         }
     }
@@ -127,10 +127,10 @@ impl Move {
         let target = square::parse_square(&move_string[2..4])?;
         let promotion_target = if move_string.len() == 5 {
             match &move_string[4..] {
-                "b" => Some(PieceType::Bishop),
-                "n" => Some(PieceType::Knight),
-                "r" => Some(PieceType::Rook),
-                "q" => Some(PieceType::Queen),
+                "b" => Some(Bishop),
+                "n" => Some(Knight),
+                "r" => Some(Rook),
+                "q" => Some(Queen),
                 _ => None,
             }
         } else {

@@ -30,15 +30,9 @@ pub enum SearchInfo {
 impl SearchInfo {
     pub fn position_hash(&self) -> Option<Hash> {
         match self {
-            Self::Exact {
-                position_hash, ..
-            } => Some(*position_hash),
-            Self::Cutoff {
-                position_hash, ..
-            } => Some(*position_hash),
-            Self::All {
-                position_hash, ..
-            } => Some(*position_hash),
+            Self::Exact { position_hash, .. } => Some(*position_hash),
+            Self::Cutoff { position_hash, .. } => Some(*position_hash),
+            Self::All { position_hash, .. } => Some(*position_hash),
             Self::None => None,
         }
     }
@@ -56,15 +50,9 @@ impl SearchInfo {
 
     pub fn depth_searched(&self) -> Option<u8> {
         match self {
-            Self::Exact {
-                depth_searched, ..
-            } => Some(*depth_searched),
-            Self::Cutoff {
-                depth_searched, ..
-            } => Some(*depth_searched),
-            Self::All {
-                depth_searched, ..
-            } => Some(*depth_searched),
+            Self::Exact { depth_searched, .. } => Some(*depth_searched),
+            Self::Cutoff { depth_searched, .. } => Some(*depth_searched),
+            Self::All { depth_searched, .. } => Some(*depth_searched),
             Self::None => None,
         }
     }
@@ -166,11 +154,13 @@ impl TranspositionTable {
     }
 
     fn should_replace(old_info: &SearchInfo, new_info: &SearchInfo) -> bool {
-        let by_age = new_info.last_probed_ply()
+        let by_age = new_info
+            .last_probed_ply()
             .map(|x| match old_info.last_probed_ply() {
                 Some(y) => x - y,
-                None => u8::MAX
-            }) >= Some(8);
+                None => u8::MAX,
+            })
+            >= Some(8);
         let by_depth = old_info.depth_searched() < new_info.depth_searched();
         by_age || by_depth
     }

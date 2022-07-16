@@ -343,8 +343,7 @@ impl Board {
     }
 
     pub fn last_was_null(&self) -> bool {
-        self.history_entries[self.history_entries.len() - 1]
-            .move_played == Move::NULL_MOVE
+        self.history_entries[self.history_entries.len() - 1].move_played == Move::NULL_MOVE
     }
 
     pub fn in_check(&self, side: Color) -> bool {

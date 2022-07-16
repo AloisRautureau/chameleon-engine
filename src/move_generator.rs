@@ -66,14 +66,16 @@ pub fn generate(board: &Board, gen_type: GenType) -> MoveList {
         // If we're not in check at all, we can generate castling moves
         // as well as pinned pieces moves
         let (kingside_ok, queenside_ok) = board.side_to_move_castling_rights();
-        if kingside_ok && gen_type != GenType::Captures
+        if kingside_ok
+            && gen_type != GenType::Captures
             && ((occupancy & Bitboard::CASTLING_OCCUPANCY_MASKS[us_index][0])
                 | (attack_map & Bitboard::CASTLING_ATTACKED_MASKS[us_index][0]))
                 .is_empty()
         {
             move_list.push(Move::new_kingside_castle(us))
         }
-        if queenside_ok && gen_type != GenType::Captures
+        if queenside_ok
+            && gen_type != GenType::Captures
             && ((occupancy & Bitboard::CASTLING_OCCUPANCY_MASKS[us_index][1])
                 | (attack_map & Bitboard::CASTLING_ATTACKED_MASKS[us_index][1]))
                 .is_empty()

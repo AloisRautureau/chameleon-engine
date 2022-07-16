@@ -5,8 +5,8 @@ use crate::piece::PieceType;
 use crate::square::Square;
 
 use crate::r#move::Move;
-use std::cmp::max;
 use rand::Rng;
+use std::cmp::max;
 
 // Build script to calculate evaluation constants at compile time
 include!(concat!(env!("OUT_DIR"), "/evaluation_constants.rs"));
@@ -26,10 +26,8 @@ pub struct Evaluation {
     pub full_eval: bool,
 }
 impl Evaluation {
-    pub const MIDGAME_PIECE_TYPE_VALUE: [Score; 6] =
-        [100, 300, 350, 500, 900, 9999];
-    pub const ENDGAME_PIECE_TYPE_VALUE: [Score; 6] =
-        [120, 250, 300, 550, 850, 9999];
+    pub const MIDGAME_PIECE_TYPE_VALUE: [Score; 6] = [100, 300, 350, 500, 900, 9999];
+    pub const ENDGAME_PIECE_TYPE_VALUE: [Score; 6] = [120, 250, 300, 550, 850, 9999];
     pub const MATE_SCORE: Score = i32::MAX / 2;
     pub const DRAW_SCORE: Score = 0;
     pub const PHASE_VALUE: [Score; 6] = [0, 1, 1, 2, 4, 0];
@@ -50,15 +48,15 @@ impl Evaluation {
                 score: -Self::MATE_SCORE,
                 game_phase: GamePhase::EndGame,
                 is_drawn: false,
-                full_eval: true
-            }
+                full_eval: true,
+            };
         } else if board.king_square(board.side_to_move().opposite()).is_none() {
             return Evaluation {
                 score: Self::MATE_SCORE,
                 game_phase: GamePhase::EndGame,
                 is_drawn: false,
-                full_eval: true
-            }
+                full_eval: true,
+            };
         }
 
         let mut phase = 0;
@@ -101,7 +99,8 @@ impl Evaluation {
         let noise = rand::thread_rng().gen_range(-10..10);
 
         Evaluation {
-            score: ((mg_score * phase) + (eg_score * (Self::MAX_PHASE - phase))) / Self::MAX_PHASE + noise,
+            score: ((mg_score * phase) + (eg_score * (Self::MAX_PHASE - phase))) / Self::MAX_PHASE
+                + noise,
             game_phase,
             is_drawn: false,
             full_eval: false,
@@ -172,7 +171,7 @@ impl Evaluation {
             // the number of squares a piece can reach
             let (w_pins, b_pins) = (
                 board.pins(board.king_square(Color::White).unwrap()).0,
-                board.pins(board.king_square(Color::Black).unwrap()).0
+                board.pins(board.king_square(Color::Black).unwrap()).0,
             );
             scores[Color::White as usize] -= w_pins.pop_count() as Score * 50;
             scores[Color::Black as usize] -= b_pins.pop_count() as Score * 50;

@@ -1,7 +1,3 @@
-#[global_allocator]
-static GLOBAL: MiMalloc = MiMalloc;
-use mimalloc::MiMalloc;
-
 pub mod bitboard;
 pub mod board;
 mod castling;

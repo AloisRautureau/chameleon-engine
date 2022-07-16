@@ -45,7 +45,7 @@ impl Default for UCI {
 
 impl UCI {
     pub fn run(&mut self) {
-        while let Ok(line) = self.editor.readline("uci> ") {
+        while let Ok(line) = self.editor.readline("") {
             match self.handle_command(&line) {
                 Ok(UCIOkCode::ShouldQuit) => break,
                 Err(UCIErrCode::BadCommand(cmd)) => {
